@@ -92,7 +92,7 @@ export function IntakePanel({ onLocate }: Props = {}) {
       heating,
       goal,
     });
-    window.location.href = `/api/quote?${params.toString()}`;
+    window.location.href = `/quote?${params.toString()}`;
   };
 
   return (

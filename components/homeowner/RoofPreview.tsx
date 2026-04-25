@@ -59,9 +59,10 @@ export function RoofPreview({ coords, address }: Props) {
 
   return (
     <div className="absolute inset-0">
-      {/* Hidden img triggers onLoad/onError; we don't render it directly */}
+      {/* key={src} forces re-mount on URL change so onLoad fires every time */}
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
+        key={src}
         src={src}
         alt=""
         className={imgState === "loaded" ? "absolute inset-0 w-full h-full object-cover" : "hidden"}

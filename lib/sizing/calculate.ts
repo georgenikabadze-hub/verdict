@@ -15,6 +15,7 @@ import type {
   Strategy,
   Variant,
 } from "@/lib/contracts";
+import { recommendBom } from "@/lib/reonic/recommend";
 
 // ---------------------------------------------------------------------------
 // Constants (German residential defaults)
@@ -508,6 +509,20 @@ export function sizeQuote(
     // whether to include it in the BoM.
     result.heatPumpKw = round1(heatPumpKwBaseline);
   }
+
+  result.variants = result.variants.map((variant) => {
+    const recommendation = recommendBom(result, intake, variant.strategy);
+    const annualSavingsEur = variant.monthlySavingsEur * 12;
+    return {
+      ...variant,
+      bom: recommendation.bom,
+      paybackYears:
+        annualSavingsEur > 0
+          ? round1(recommendation.bom.totalEur / annualSavingsEur)
+          : 0,
+      citedProjectIds: recommendation.citedProjectIds,
+    };
+  }) as [Variant, Variant, Variant];
 
   return result;
 }
