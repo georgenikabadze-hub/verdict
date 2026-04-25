@@ -3,9 +3,9 @@
 > Reonic's installer-DNA quote intelligence layer.
 > Built for Big Berlin Hack 2026 · Reonic track.
 
-Reonic already automates the technical plan — layout, strings, inverter sizing, BoM. **Verdict generates the homeowner-facing experience that turns a curious visitor into a Verdict-Qualified Lead** — measured roof, real bill, intent, recommended Reonic-grounded BoM. *Automatisierung + Erfahrungswissen* — trained on Reonic's 1,277 completed projects and 19,257 real line items.
+Reonic already automates the technical plan — layout, strings, inverter sizing, BoM. **Verdict generates the homeowner-facing experience that turns a curious visitor into a Verdict-Qualified Lead** — measured roof, real bill, intent, recommended Reonic-grounded BoM. *Automation + experience-based knowledge* — trained on Reonic's 1,277 completed projects and 19,257 real line items.
 
-**The MVP is the homeowner side**: type address → cinematic 3D house reveal → 4-field intake → recommended variant + 2 alternatives → "Send to installer" CTA. The installer view (lead landing in inbox) is a stretch goal.
+**The MVP is the full loop**: homeowner types address → cinematic 3D house reveal → 4-field intake → recommended variant + 2 alternatives → "Send to installer" CTA → installer reviews & adjusts → second touch lands back on the homeowner phone with the approved final BoM. All UI in English.
 
 See [PLAN.md](./PLAN.md) for the full concept, pitch, build stages, wireframes, and pre-mortem.
 
