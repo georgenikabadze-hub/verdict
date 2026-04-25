@@ -21,7 +21,8 @@ interface GeocodeOk {
 }
 
 async function geocode(address: string, key: string): Promise<GeocodeOk | null> {
-  const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&components=country:DE&key=${key}`;
+  // No country filter — global coverage
+  const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${key}`;
   try {
     const res = await fetch(url, { signal: AbortSignal.timeout(4000), cache: "no-store" });
     if (!res.ok) return null;
@@ -80,7 +81,18 @@ export default async function QuotePage({
     );
   }
 
-  const geo = await geocode(params.address, key);
+  // Accept raw "lat, lng" — skip geocoding when present
+  const COORD_RE = /^\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*$/;
+  const m = params.address.match(COORD_RE);
+  const directCoords = m
+    ? {
+        lat: parseFloat(m[1]),
+        lng: parseFloat(m[2]),
+        formattedAddress: `${parseFloat(m[1]).toFixed(5)}, ${parseFloat(m[2]).toFixed(5)}`,
+      }
+    : null;
+
+  const geo = directCoords ?? (await geocode(params.address, key));
   const fallbackSegment: RoofSegment = {
     pitchDegrees: 35,
     azimuthDegrees: 180,

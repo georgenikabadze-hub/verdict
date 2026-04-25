@@ -13,7 +13,8 @@ interface GeocodeResult {
 async function geocode(address: string): Promise<GeocodeResult | null> {
   const key = process.env.GOOGLE_MAPS_API_KEY;
   if (!key) return null;
-  const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&components=country:DE&key=${key}`;
+  // No country filter — global coverage
+  const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${key}`;
   const res = await fetch(url, { signal: AbortSignal.timeout(4000) });
   if (!res.ok) return null;
   const data = await res.json();

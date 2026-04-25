@@ -66,9 +66,29 @@ export function IntakePanel({ onLocate }: Props = {}) {
     );
   };
 
-  // Forward-geocode when the user pauses typing (debounced)
+  /** Match "lat, lng" — supports negative, decimals, optional whitespace */
+  const COORD_RE = /^\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*$/;
+
+  const tryParseCoords = (q: string): { lat: number; lng: number } | null => {
+    const m = q.match(COORD_RE);
+    if (!m) return null;
+    const lat = parseFloat(m[1]);
+    const lng = parseFloat(m[2]);
+    if (Number.isNaN(lat) || Number.isNaN(lng)) return null;
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+    return { lat, lng };
+  };
+
   const forwardGeocode = async (q: string) => {
     if (q.trim().length < 5) return;
+
+    // Direct coords path — skip geocoding entirely
+    const coords = tryParseCoords(q);
+    if (coords) {
+      onLocate?.(coords, `${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`);
+      return;
+    }
+
     try {
       const res = await fetch(`/api/forward-geocode?q=${encodeURIComponent(q)}`);
       const data = await res.json();

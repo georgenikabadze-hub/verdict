@@ -9,7 +9,8 @@ export async function GET(req: NextRequest) {
   if (!q) return NextResponse.json({ error: "missing ?q parameter" }, { status: 400 });
   if (!key) return NextResponse.json({ error: "server missing GOOGLE_MAPS_API_KEY" }, { status: 500 });
 
-  const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(q)}&components=country:DE&key=${key}&language=en`;
+  // No country filter — accept any address worldwide (Solar API will gracefully 404 if no coverage)
+  const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(q)}&key=${key}&language=en`;
 
   try {
     const res = await fetch(url, { signal: AbortSignal.timeout(4000) });
