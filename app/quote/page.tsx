@@ -2,6 +2,7 @@ import Link from "next/link";
 import { sizeQuoteWithRationale } from "@/lib/sizing/calculate";
 import { VariantCardStack } from "@/components/homeowner/VariantCardStack";
 import { SendToInstaller } from "@/components/homeowner/SendToInstaller";
+import { SpouseShareCard } from "@/components/homeowner/SpouseShareCard";
 import { tryParseCoords } from "@/lib/parse-coords";
 import type { Intake, RoofSegment } from "@/lib/contracts";
 
@@ -141,6 +142,14 @@ export default async function QuotePage({
 
         {/* Send to installer */}
         <SendToInstaller leadId={`q-${Date.now().toString(36)}`} />
+
+        {/* Spouse-share viral moment */}
+        <SpouseShareCard
+          monthlySavingsEur={sizing.variants[1].monthlySavingsEur}
+          paybackYears={sizing.variants[1].paybackYears}
+          systemKwp={sizing.systemKwp}
+          address={intake.address}
+        />
 
         {/* Trust line */}
         <p className="text-[11px] text-[#5B6470] text-center">
