@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { IntakePanel } from "./IntakePanel";
 import { RoofPreview } from "./RoofPreview";
+import { RoofMap3D } from "./RoofMap3D";
 import { LiveRoofFacts } from "./LiveRoofFacts";
 import type { RoofSegment } from "@/lib/contracts";
 
@@ -58,7 +59,11 @@ export function HomeShell() {
       <section className="flex-1 grid grid-cols-1 lg:grid-cols-[1.1fr_0.9fr] gap-0">
         {/* LEFT */}
         <div className="relative h-[42vh] lg:h-auto bg-[#0A0E1A] border-b lg:border-b-0 lg:border-r border-[#1A1F2A] overflow-hidden">
-          <RoofPreview coords={coords} address={address} />
+          {coords ? (
+            <RoofMap3D coords={coords} address={address} />
+          ) : (
+            <RoofPreview coords={coords} address={address} />
+          )}
           
           {/* Live Roof Facts Strip */}
           <div className="absolute bottom-16 left-4 right-4 z-20 sm:max-w-2xl">

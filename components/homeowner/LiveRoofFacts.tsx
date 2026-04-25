@@ -46,7 +46,7 @@ export function LiveRoofFacts({
     return (
       <div className="flex h-[52px] w-full items-center justify-center rounded-md border border-[#2A3038] bg-[#12161C]/85 px-4 backdrop-blur">
         <div className="flex items-center gap-3">
-          <div className="h-2 w-2 animate-pulse rounded-full bg-[#3DAEFF]" />
+          <div className="h-2 w-2 animate-pulse rounded-md bg-[#3DAEFF]" />
           <span className="text-xs font-medium text-[#9BA3AF] animate-pulse">Detecting roof faces...</span>
         </div>
         <div className="absolute right-4 hidden sm:flex gap-4">
@@ -72,7 +72,7 @@ export function LiveRoofFacts({
   return (
     <div className="flex flex-col sm:flex-row sm:h-[52px] w-full items-start sm:items-center justify-between gap-3 sm:gap-0 rounded-md border border-[#2A3038] bg-[#12161C]/85 p-3 sm:py-0 sm:px-4 backdrop-blur transition-all">
       <div className="flex items-center gap-3">
-        <div className={`h-2 w-2 rounded-full ${badgeColor}`} />
+        <div className={`h-2 w-2 rounded-md ${badgeColor}`} />
         <span className="text-xs font-bold uppercase tracking-widest text-[#F7F8FA]">Live roof facts</span>
       </div>
 
@@ -91,7 +91,7 @@ export function LiveRoofFacts({
         />
       </div>
 
-      <div className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-tight text-[#0A0E1A] ${badgeColor}`}>
+      <div className={`rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-tight text-[#0A0E1A] ${badgeColor}`}>
         {pillText}
       </div>
     </div>
