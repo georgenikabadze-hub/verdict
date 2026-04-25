@@ -284,13 +284,24 @@ The homeowner-facing site, end to end. Address → cinematic house reveal → 4-
 
 Concrete sub-deliverables:
 1. **Hero landing** — full-bleed cinematic 3D German roof with sunlight sweeping panels onto it; one large address autocomplete input; subcopy citing Reonic data ("Basierend auf 1.277 echten Reonic-Projekten").
+   - **Hero copy (locked)**: *„Ihr Haus kann mehr verdienen, als Sie gerade für Energie verlieren."*
+   - **Opening 3 seconds (locked)**: black screen → thin neon scan line sweeps across a dark 3D neighborhood → one house locks into focus from above → roof edges glow → panels snap onto the roof with quiet precision → monthly savings number fades in *before* anything else.
 2. **Cinematic house reveal** (2.8 sec) — staged "Grundstück gefunden · Lade 3D-Ansicht · Erkenne Dachflächen" loader; cross-fade from satellite top-down → cached `.glb` mesh oblique view; pulsing pin + address label; "Wir haben Ihr Dach gefunden."
 3. **House interaction = guided, not free** — drag-rotate slightly, pinch-zoom, three preset views ("Dach / Straße / Module"). NO free CAD camera.
-4. **4-field intake (stepper)** — bill slider (€), EV toggle, heating type icons, primary goal (Stromkosten / Unabhängigkeit). Each field updates 3D scene live.
-5. **The Verdict reveal** — single dominant recommended card ("Empfohlen für Ihr Haus: **Best Close Rate ★**"); two alternatives collapsed below ("Best Margin", "Best Lifetime Value"); one big number ROI ("Sie sparen ca. **€142/Monat**"); horizontal payback timeline (Year 0 invest → Year 8 break-even → €38,400 over 25y). **Each component shows a traffic-light confidence dot (🟢 green = high-confidence match / 🟡 yellow = acceptable / 🔴 red = installer review needed)** — visceral, no-jargon trust signal.
-6. **Surprise & delight** — animated panel snap with per-face count labels; bill transformation (€220 → €78); CO2 → trees ("34 Bäume im Schwarzwald"); spouse-share card ("Unser Haus könnte €38.400 in 25 Jahren sparen").
+4. **4-field intake (stepper, locked)** — Postleitzahl (5-digit numeric) · Stromkosten / Monat (€ slider, default 120) · Heizsystem (segmented: Gas · Öl · Wärmepumpe · Sonstige) · Besonderheiten (multi-select chips: E-Auto · Pool · Homeoffice). Each field updates 3D scene live.
+5. **The Verdict reveal — recommended-card layout (locked, top-to-bottom)**:
+   1. Variant label badge: **Best Close Rate ★** (small, uppercase, neon accent)
+   2. Big savings number: **„Sie sparen ca. €142/Monat"** (32px+, dominant)
+   3. Horizontal payback timeline (Year 0 invest → Year 8 break-even → €38,400 über 25 Jahre)
+   4. Component summary row with traffic-light dots: **🟢 PV · 🟢 Speicher · 🟡 Wärmepumpe**
+   5. Three one-line trust bullets: *„passt aufs Dach" · „am schnellsten amortisiert" · „installer-ready"*
+   6. **„Warum diese Empfehlung?" reveal drawer** — opens to show 3 cited Reonic project IDs + the brand-prior reasoning + the objection-prediction
+   7. Primary CTA button (full-width)
+   
+   Two alternative variants collapsed below as compact cards: **Best Margin** and **Best Lifetime Value**.
+6. **Surprise & delight (locked)** — animated panel snap with per-face count labels; bill transformation (€220 → €78); CO2 → trees ("34 Bäume im Schwarzwald"); **viral spouse-share card**: *„Schatz, unser Dach verliert gerade ca. €142 im Monat."* with the rendered house, payback timeline, and "Installer-ready in 60 Sekunden" footer.
 7. **Trust block** — citations: 2-3 similar Reonic projects ("Ähnlich wie Projekte #882, #1041 in Hamburg"); explicit "No credit check, no income, no obligation" line; brand transparency (Huawei + EcoFlow logos visible).
-8. **Handoff CTA** — primary button "Verdict an Installateur senden" + microcopy "unverbindlich · kein Anruf · Installateur erhält Ihre Verdict-Mappe (Dachvermessung, Bedarf, empfohlene Anlage) und kann sofort kalkulieren."
+8. **Handoff CTA (locked)** — primary button **„An geprüften Reonic-Installer senden"** + microcopy *„unverbindlich · kein Anruf · Installer erhält Ihre Verdict-Mappe (Dachvermessung, Bedarf, empfohlene Anlage) und kann sofort kalkulieren."*
 9. **Confirmation screen** — animated "Verdict gesendet · Müller Solartechnik meldet sich innerhalb von 24 Stunden" + optional "Verdict-Mappe als PDF herunterladen".
 
 **Tech stack**: Next.js + react-three-fiber + drei (`useGLTF` + DRACOLoader); shadcn/ui + react-hook-form for the stepper; Gemini 2.5 Pro for variant generation + rationale; KNN retrieval over `projects_status_quo.csv` + `project_options_parts.csv`; Google Places autocomplete; Google Solar API `buildingInsights` cached for the 4 demo addresses.
