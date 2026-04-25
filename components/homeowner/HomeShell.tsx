@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { IntakePanel } from "./IntakePanel";
-import { RoofMap3D } from "./RoofMap3D";
+import { CesiumRoofView } from "./CesiumRoofView";
 import { RuhrCinematic } from "./RuhrCinematic";
 import { LiveRoofFacts } from "./LiveRoofFacts";
 import { InstallerApprovedToast } from "./InstallerApprovedToast";
@@ -63,7 +63,7 @@ export function HomeShell() {
         {/* LEFT */}
         <div className="relative h-[42vh] lg:h-auto bg-[#0A0E1A] border-b lg:border-b-0 lg:border-r border-[#1A1F2A] overflow-hidden">
           {coords ? (
-            <RoofMap3D coords={coords} address={address} />
+            <CesiumRoofView coords={coords} address={address} />
           ) : (
             <RuhrCinematic />
           )}

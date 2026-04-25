@@ -36,13 +36,16 @@ function latLngKey(lat: number, lng: number): string {
 }
 
 async function loadFixture(api: "solar" | "datalayers", lat: number, lng: number) {
-  // Only return a fixture that matches the SPECIFIC lat/lng. Never return a
-  // generic landmark fixture as a fallback — that lies about the user's roof
-  // (e.g. returning Brandenburg Gate's 818 m² for an address in Tbilisi).
+  // Only return a fixture that matches the SPECIFIC lat/lng. Read with fs so
+  // Turbopack doesn't choke on a template-literal dynamic import.
   const key = latLngKey(lat, lng);
+  const fileName = `${api}_${key}.json`;
   try {
-    const mod = await import(`../../data/fixtures/cached/${api}_${key}.json`);
-    const data = (mod.default ?? mod) as Record<string, unknown>;
+    const fs = await import("node:fs/promises");
+    const path = await import("node:path");
+    const filePath = path.join(process.cwd(), "data", "fixtures", "cached", fileName);
+    const text = await fs.readFile(filePath, "utf-8");
+    const data = JSON.parse(text) as Record<string, unknown>;
     if (data && typeof data === "object") return data;
   } catch {
     // No fixture for this exact location — caller will surface "no coverage".

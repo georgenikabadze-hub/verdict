@@ -1,27 +1,23 @@
-NEXT: Sprint 1 hour 2 — wire IntakeBottomSheet + VariantCardStack components, connect to Zustand store, render 3 mocked variant cards from sizeQuote()  (2026-04-25T18:10:00Z)
+NEXT: Sprint 3 stretch — Cesium clipping convention research (4 attempts failed); meanwhile demo is fully functional on localhost  (2026-04-25T20:35:00Z)
 
-## Done so far
-- Next.js 15 + Turbopack + Tailwind 4 + Inter + dark Tesla-precision palette ✓
-- `lib/contracts.ts` — frozen draft (Intake, BoM, Variant, RoofSegment, SizingResult, ApiStatus, LeadPacket) ✓
-- `data/schema.ts` — Zod schemas matching contracts ✓
-- `lib/sizing/calculate.ts` — deterministic sizer with 3 strategies; 5 golden-profile tests passing ✓
-- `lib/api/{places,solar,gemini,timeout}.ts` — wrappers with 4s timeout + Live/Cached fallback; 6 resilience tests passing ✓
-- `lib/api-status/Badge.tsx` — Live/Cached/Error pill ✓
-- `app/page.tsx` — minimal hero (Verdict wordmark + address input + pulsing live signal) ✓
-- Tests: 11 passing total (5 sizer + 6 API resilience)
-- Vercel: deployed to **https://verdict-gamma-ten.vercel.app** (HTTP 200, 285ms TTFB)
-- Env vars set in production / preview / development
+## What works on localhost right now
+- ✅ Ruhr.glb cinematic on landing (drone scan, drag to orbit)
+- ✅ Type/paste any address (decimal, DMS, lat/lng) OR "Use my location"
+- ✅ Live Photorealistic 3D Tiles via Cesium for typed addresses (220m oblique, drag to rotate, neon pin at building)
+- ✅ Live Roof Facts strip (real Solar API segments + imagery date)
+- ✅ /quote results page with 3 Reonic-grounded variants (KNN over 1,277 projects) + spouse-share card + Send-to-installer CTA
+- ✅ /installer review with editable BoM, Recalculate, Approve and send
+- ✅ 2-second polling push notification on / when installer approves
+- ✅ All UI in English, dark Tesla aesthetic, no rounded-full
+- ✅ 21 unit tests passing + Playwright e2e screenshot harness
 
-## Next session priorities (Sprint 1 H+2 → H+3)
-1. `store/appStore.ts` — Zustand + persist middleware, state shape per BOOTSTRAP.md §7
-2. `components/homeowner/IntakeBottomSheet.tsx` — 4-field intake (bill slider, EV toggle, heating segmented, goal segmented)
-3. `components/homeowner/VariantCardStack.tsx` — 3 cards rendered from `SizingResult.variants`
-4. `components/homeowner/LiveRoofFacts.tsx` — strip showing area/pitch/azimuth from Solar API response
-5. Wire `app/page.tsx` to call sizer with mocked roof segments → display variants
-6. `app/installer/page.tsx` + `components/installer/InstallerReview.tsx` (editable BoM rows + Recalculate button)
+## Known issues
+- 🟡 Cesium ClippingPlaneCollection: 4 sign/normal/modelMatrix combinations tried, all show either nothing or full neighborhood. Currently DISABLED. Codex agent v3 running with stricter "cite Sandcastle, no speculation" prompt.
 
-## Open
-- `lib/reonic/recommend.ts` not yet written — sizer currently returns `citedProjectIds: ["P-001","P-002","P-003"]` placeholders. Needs CSV→JSON conversion + KNN recommender. (Reonic Agent prompt in BOOTSTRAP.md §7.)
-- Ruhr.glb cinematic component (Sprint 3, S+8 hour)
-- CesiumJS + Photorealistic 3D Tiles route (Sprint 3, S+11 hour)
-- `app/api/quote/route.ts` orchestrator (Sprint 4, S+12 hour)
+## Sprint 5 (demo lock + dress) — pending
+- Final Vercel `--prod` deploy (waiting for user "ship it")
+- 2-min Loom recording
+- Pitch script rehearsal
+
+## Sprint 6 (submit) — pending
+- Submission package post Sun 14:00
