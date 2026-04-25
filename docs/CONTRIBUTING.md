@@ -1,0 +1,3 @@
+# Contributing
+
+Verdict uses parallel AI workstreams with strict file ownership to avoid overlap: Claude owns orchestration, integration, review, app routes, API surfaces, store, and core project docs; Codex owns deterministic backend logic, contracts, data/schema work, sizing, Reonic integration, scripts, fixtures, and unit tests; Gemini owns visual implementation across UI primitives, scene/3D components, Cesium, homeowner and installer skinning, global CSS, and Tailwind configuration; Lovable provides the first UI scaffold only, after which Gemini owns that surface. Check `docs/BOOTSTRAP.md` section 1 before editing outside your lane.

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { Heating, Goal } from "@/lib/contracts";
+import { tryParseCoords } from "@/lib/parse-coords";
 
 const HEATING_OPTIONS: { value: Heating; label: string; emoji: string }[] = [
   { value: "gas", label: "Gas", emoji: "🔥" },
@@ -66,26 +67,13 @@ export function IntakePanel({ onLocate }: Props = {}) {
     );
   };
 
-  /** Match "lat, lng" — supports negative, decimals, optional whitespace */
-  const COORD_RE = /^\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*$/;
-
-  const tryParseCoords = (q: string): { lat: number; lng: number } | null => {
-    const m = q.match(COORD_RE);
-    if (!m) return null;
-    const lat = parseFloat(m[1]);
-    const lng = parseFloat(m[2]);
-    if (Number.isNaN(lat) || Number.isNaN(lng)) return null;
-    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
-    return { lat, lng };
-  };
-
   const forwardGeocode = async (q: string) => {
-    if (q.trim().length < 5) return;
+    if (q.trim().length < 4) return;
 
-    // Direct coords path — skip geocoding entirely
-    const coords = tryParseCoords(q);
-    if (coords) {
-      onLocate?.(coords, `${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`);
+    // Direct coords path (decimal + DMS + many formats) — skip geocoding entirely
+    const parsed = tryParseCoords(q);
+    if (parsed) {
+      onLocate?.({ lat: parsed.lat, lng: parsed.lng }, parsed.formatted);
       return;
     }
 
@@ -116,20 +104,20 @@ export function IntakePanel({ onLocate }: Props = {}) {
   };
 
   return (
-    <div className="flex flex-col gap-7">
-      {/* Hero copy */}
-      <div className="flex flex-col gap-2">
-        <h1 className="text-3xl sm:text-4xl lg:text-5xl font-semibold leading-[1.1] tracking-tight">
+    <div className="flex flex-col gap-4">
+      {/* Hero copy — compact */}
+      <div className="flex flex-col gap-1">
+        <h1 className="text-xl sm:text-2xl lg:text-[26px] font-semibold leading-tight tracking-tight">
           Your home can earn more than you&rsquo;re losing on energy.
         </h1>
-        <p className="text-sm sm:text-base text-[#9BA3AF]">
+        <p className="text-xs sm:text-sm text-[#9BA3AF]">
           Based on 1,277 real Reonic projects.
         </p>
       </div>
 
       {/* Address */}
-      <div className="flex flex-col gap-2">
-        <label htmlFor="address" className="text-xs uppercase tracking-wider text-[#9BA3AF]">
+      <div className="flex flex-col gap-1.5">
+        <label htmlFor="address" className="text-[10px] uppercase tracking-wider text-[#9BA3AF]">
           Address
         </label>
         <input
@@ -139,30 +127,30 @@ export function IntakePanel({ onLocate }: Props = {}) {
           onChange={(e) => setAddress(e.target.value)}
           onBlur={onAddressBlur}
           onKeyDown={(e) => { if (e.key === "Enter") { e.currentTarget.blur(); } }}
-          placeholder="Enter your address..."
+          placeholder="Enter address or lat,lng..."
           autoComplete="off"
-          className="w-full rounded-lg border border-[#2A3038] bg-[#12161C] px-5 py-3.5 text-base text-[#F7F8FA] placeholder:text-[#5B6470] focus:outline-none focus:border-[#3DAEFF] focus:ring-2 focus:ring-[#3DAEFF]/30 transition-all"
+          className="w-full rounded-lg border border-[#2A3038] bg-[#12161C] px-4 py-2.5 text-sm text-[#F7F8FA] placeholder:text-[#5B6470] focus:outline-none focus:border-[#3DAEFF] focus:ring-2 focus:ring-[#3DAEFF]/30 transition-all"
         />
         <button
           type="button"
           onClick={useMyLocation}
           disabled={locating}
-          className="self-start text-sm text-[#9BA3AF] hover:text-[#3DAEFF] transition-colors disabled:cursor-wait disabled:text-[#5B6470]"
+          className="self-start text-xs text-[#9BA3AF] hover:text-[#3DAEFF] transition-colors disabled:cursor-wait disabled:text-[#5B6470]"
         >
           {locating ? "⌖ Locating..." : "⌖ Use my location"}
         </button>
         {locationError && (
-          <p className="text-xs text-[#F2B84B]">{locationError}</p>
+          <p className="text-[11px] text-[#F2B84B]">{locationError}</p>
         )}
       </div>
 
       {/* Bill slider */}
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-1.5">
         <div className="flex items-baseline justify-between">
-          <label htmlFor="bill" className="text-xs uppercase tracking-wider text-[#9BA3AF]">
+          <label htmlFor="bill" className="text-[10px] uppercase tracking-wider text-[#9BA3AF]">
             Electricity bill / month
           </label>
-          <span className="text-xl font-semibold tabular-nums text-[#F7F8FA]">€{bill}</span>
+          <span className="text-base font-semibold tabular-nums text-[#F7F8FA]">€{bill}</span>
         </div>
         <input
           id="bill"
@@ -174,30 +162,23 @@ export function IntakePanel({ onLocate }: Props = {}) {
           onChange={(e) => setBill(Number(e.target.value))}
           className="accent-[#3DAEFF]"
         />
-        <div className="flex justify-between text-[10px] text-[#5B6470]">
-          <span>€40</span>
-          <span>€500+</span>
-        </div>
       </div>
 
       {/* EV */}
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex flex-col">
-          <span className="text-xs uppercase tracking-wider text-[#9BA3AF]">Electric vehicle</span>
-          <span className="text-xs text-[#5B6470]">Adds a wallbox + ~2,500 kWh/yr</span>
-        </div>
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-[10px] uppercase tracking-wider text-[#9BA3AF]">Electric vehicle</span>
         <div className="flex rounded-lg border border-[#2A3038] overflow-hidden">
           <button
             type="button"
             onClick={() => setEv(false)}
-            className={`px-4 py-2 text-sm transition-colors ${!ev ? "bg-[#12161C] text-[#F7F8FA]" : "text-[#9BA3AF] hover:text-[#F7F8FA]"}`}
+            className={`px-3 py-1.5 text-xs transition-colors ${!ev ? "bg-[#12161C] text-[#F7F8FA]" : "text-[#9BA3AF] hover:text-[#F7F8FA]"}`}
           >
             No
           </button>
           <button
             type="button"
             onClick={() => setEv(true)}
-            className={`px-4 py-2 text-sm transition-colors ${ev ? "bg-[#3DAEFF] text-[#0A0E1A]" : "text-[#9BA3AF] hover:text-[#F7F8FA]"}`}
+            className={`px-3 py-1.5 text-xs transition-colors ${ev ? "bg-[#3DAEFF] text-[#0A0E1A]" : "text-[#9BA3AF] hover:text-[#F7F8FA]"}`}
           >
             Yes
           </button>

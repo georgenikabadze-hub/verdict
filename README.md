@@ -7,7 +7,14 @@ Reonic already automates the technical plan — layout, strings, inverter sizing
 
 **The MVP is the full loop**: homeowner types address → cinematic 3D house reveal → 4-field intake → recommended variant + 2 alternatives → "Send to installer" CTA → installer reviews & adjusts → second touch lands back on the homeowner phone with the approved final BoM. All UI in English.
 
-See [PLAN.md](./PLAN.md) for the full concept, pitch, build stages, wireframes, and pre-mortem.
+## Quick start
+
+```bash
+pnpm install
+pnpm dev       # localhost:3000
+pnpm test      # vitest unit tests
+pnpm test:e2e  # playwright smoke tests on the live deploy
+```
 
 ## Setup
 
@@ -16,6 +23,15 @@ git clone https://github.com/georgenikabadze-hub/verdict.git
 cd verdict
 cp .env.example .env.local   # fill in your own keys (never commit them)
 ```
+
+## Project docs
+
+- [Plan](./docs/PLAN.md) — full concept, pitch, build stages, wireframes, and pre-mortem.
+- [Sprint](./docs/SPRINT.md) — sprint cadence and delivery checkpoints.
+- [Bootstrap](./docs/BOOTSTRAP.md) — cold-start protocol and AI workstream ownership.
+- [Status](./STATUS.md) — current build state and next handoff.
+- [Contributing](./docs/CONTRIBUTING.md) — contributor ownership map.
+- [Landing mockup](./docs/landing-mockup.png) — visual reference.
 
 ## Partner technologies (3 of 7 required — final picks decided at the hackathon)
 

@@ -16,6 +16,7 @@ import type {
   Variant,
 } from "@/lib/contracts";
 import { recommendBom } from "@/lib/reonic/recommend";
+import { enrichVariantRationale } from "@/lib/sizing/rationale";
 
 // ---------------------------------------------------------------------------
 // Constants (German residential defaults)
@@ -525,4 +526,36 @@ export function sizeQuote(
   }) as [Variant, Variant, Variant];
 
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// Async entry point with LLM-enriched rationale
+// ---------------------------------------------------------------------------
+
+/**
+ * Asynchronous wrapper around `sizeQuote` that enriches every Variant's
+ * `objection` with Gemini-generated rationale (objection + reason).
+ *
+ * Calls `sizeQuote` first to keep the math purely deterministic, then fans
+ * out the enrichment in parallel via `Promise.all`. The enrichment helper
+ * never throws — on any failure it falls back to a deterministic template —
+ * so this function is also non-throwing in practice.
+ */
+export async function sizeQuoteWithRationale(
+  intake: Intake,
+  roofSegments: RoofSegment[],
+): Promise<SizingResult> {
+  const base = sizeQuote(intake, roofSegments);
+
+  const enriched = await Promise.all(
+    base.variants.map(async (variant) => {
+      const rationale = await enrichVariantRationale(variant, intake);
+      return { ...variant, objection: rationale.objection };
+    }),
+  );
+
+  return {
+    ...base,
+    variants: [enriched[0], enriched[1], enriched[2]] as [Variant, Variant, Variant],
+  };
 }

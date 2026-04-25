@@ -86,7 +86,7 @@ export function HomeShell() {
         </div>
 
         {/* RIGHT */}
-        <div className="flex flex-col justify-center px-6 sm:px-10 lg:px-14 py-10 lg:py-12 overflow-y-auto">
+        <div className="flex flex-col px-6 sm:px-10 lg:px-12 py-6 lg:py-8 overflow-y-auto lg:max-h-[calc(100dvh-72px)]">
           <IntakePanel
             onLocate={(c, a) => {
               setCoords(c);

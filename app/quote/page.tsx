@@ -1,7 +1,8 @@
 import Link from "next/link";
-import { sizeQuote } from "@/lib/sizing/calculate";
+import { sizeQuoteWithRationale } from "@/lib/sizing/calculate";
 import { VariantCardStack } from "@/components/homeowner/VariantCardStack";
 import { SendToInstaller } from "@/components/homeowner/SendToInstaller";
+import { tryParseCoords } from "@/lib/parse-coords";
 import type { Intake, RoofSegment } from "@/lib/contracts";
 
 export const dynamic = "force-dynamic";
@@ -81,17 +82,9 @@ export default async function QuotePage({
     );
   }
 
-  // Accept raw "lat, lng" — skip geocoding when present
-  const COORD_RE = /^\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*$/;
-  const m = params.address.match(COORD_RE);
-  const directCoords = m
-    ? {
-        lat: parseFloat(m[1]),
-        lng: parseFloat(m[2]),
-        formattedAddress: `${parseFloat(m[1]).toFixed(5)}, ${parseFloat(m[2]).toFixed(5)}`,
-      }
-    : null;
-
+  // Accept raw coordinates in many formats (decimal, DMS, etc.) — skip geocoding when matched
+  const parsed = tryParseCoords(params.address);
+  const directCoords = parsed ? { lat: parsed.lat, lng: parsed.lng, formattedAddress: parsed.formatted } : null;
   const geo = directCoords ?? (await geocode(params.address, key));
   const fallbackSegment: RoofSegment = {
     pitchDegrees: 35,
@@ -113,7 +106,7 @@ export default async function QuotePage({
     goal: (params.goal ?? "lower_bill") as Intake["goal"],
   };
 
-  const sizing = sizeQuote(intake, segments.length > 0 ? segments : [fallbackSegment]);
+  const sizing = await sizeQuoteWithRationale(intake, segments.length > 0 ? segments : [fallbackSegment]);
 
   const liveOrCached = segments.length > 0 ? "live" : "cached";
 
