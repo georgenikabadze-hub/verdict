@@ -7,7 +7,8 @@
     "build": "next build --turbopack",
     "start": "next start",
     "lint": "eslint",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prebake": "node scripts/csv_to_json.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
