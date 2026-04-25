@@ -21,6 +21,93 @@ if (typeof window !== "undefined") {
   (window as any).CESIUM_BASE_URL = CESIUM_BASE_URL;
 }
 
+// 5-metre buffer around the Solar API bounding box so eaves, gutters, and
+// the patch of garden the homeowner uses for orientation don't get amputated.
+const CLIP_BUFFER_METERS = 5;
+
+interface BoundingBox {
+  sw: { latitude: number; longitude: number };
+  ne: { latitude: number; longitude: number };
+}
+
+interface RoofFactsResponse {
+  boundingBox?: BoundingBox;
+}
+
+/**
+ * Convert a metre offset into a degree delta at the given latitude. Latitude
+ * degrees are ~111,320 m everywhere; longitude degrees shrink with cos(lat).
+ * Good enough for a few-metre buffer around a single building.
+ */
+function metersToLatLngDelta(
+  meters: number,
+  refLat: number,
+): { dLat: number; dLng: number } {
+  const dLat = meters / 111_320;
+  const dLng = meters / (111_320 * Math.cos((refLat * Math.PI) / 180));
+  return { dLat, dLng };
+}
+
+/**
+ * Fetch the building's bounding box from /api/roof-facts and apply a
+ * ClippingPolygonCollection that hides everything outside it. Silently
+ * no-ops when the API has no coverage — the full neighbourhood mesh
+ * stays visible as a graceful fallback.
+ */
+async function applyBuildingClip(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  Cesium: any,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  tileset: any,
+  coords: { lat: number; lng: number },
+): Promise<void> {
+  try {
+    const res = await fetch(
+      `/api/roof-facts?lat=${coords.lat}&lng=${coords.lng}`,
+      { cache: "no-store" },
+    );
+    if (!res.ok) return;
+    const data = (await res.json()) as RoofFactsResponse;
+    const bbox = data.boundingBox;
+    if (
+      !bbox ||
+      !Number.isFinite(bbox.sw?.latitude) ||
+      !Number.isFinite(bbox.sw?.longitude) ||
+      !Number.isFinite(bbox.ne?.latitude) ||
+      !Number.isFinite(bbox.ne?.longitude)
+    ) {
+      // No coverage / fixture branch — leave the neighbourhood visible.
+      return;
+    }
+
+    const refLat = (bbox.sw.latitude + bbox.ne.latitude) / 2;
+    const { dLat, dLng } = metersToLatLngDelta(CLIP_BUFFER_METERS, refLat);
+
+    const swLat = bbox.sw.latitude - dLat;
+    const swLng = bbox.sw.longitude - dLng;
+    const neLat = bbox.ne.latitude + dLat;
+    const neLng = bbox.ne.longitude + dLng;
+
+    // Counter-clockwise quad (SW → SE → NE → NW). Cesium expects positions
+    // in degrees as [lng, lat, lng, lat, ...]. With `inverse: false` the
+    // collection clips OUTSIDE this polygon — keeping the building.
+    const positions = Cesium.Cartesian3.fromDegreesArray([
+      swLng, swLat,
+      neLng, swLat,
+      neLng, neLat,
+      swLng, neLat,
+    ]);
+
+    const polygon = new Cesium.ClippingPolygon({ positions });
+    tileset.clippingPolygons = new Cesium.ClippingPolygonCollection({
+      polygons: [polygon],
+      inverse: false,
+    });
+  } catch {
+    // Network blip / aborted fetch — fall back to no clipping.
+  }
+}
+
 export default function CesiumRoofViewInner({ coords, address }: Props) {
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -123,46 +210,52 @@ export default function CesiumRoofViewInner({ coords, address }: Props) {
         viewer.scene.primitives.add(tileset);
 
         // -----------------------------------------------------------------
-        // Building isolation: clip the tileset to a 22m × 22m × 43m box
-        // around the address. Final convention (verified against Cesium docs):
-        //   - normal points INWARD (toward box interior)
-        //   - distance = NEGATIVE (e.g. -22 for a 22m radius wall)
-        //   - unionClippingRegions: true → clip outside ANY plane
-        //   - modelMatrix = eastNorthUpToFixedFrame (forward, NOT inverse)
-        // The plane equation is n·p = d. Point inside box has n·p > d for
-        // every plane → kept. Outside has at least one n·p < d → clipped.
+        // Building isolation via ClippingPolygonCollection (CesiumJS ≥1.116).
+        //
+        // We fetch the building's `boundingBox` from /api/roof-facts (which
+        // proxies Google Solar API `buildingInsights:findClosest`). The box
+        // gives us SW/NE lat/lng; we extrude it slightly (5m buffer) so eaves
+        // and immediate context survive, then build a single 4-vertex polygon
+        // in world ECEF via Cartesian3.fromDegreesArray. With `inverse: false`
+        // the collection clips OUTSIDE the polygon, leaving only the home
+        // visible against the dark scene background.
+        //
+        // Cesium API references:
+        //   https://cesium.com/learn/cesiumjs/ref-doc/ClippingPolygonCollection.html
+        //   https://cesium.com/learn/cesiumjs/ref-doc/ClippingPolygon.html
+        //
+        // No modelMatrix juggling required — polygon vertices live in world
+        // ECEF directly, unlike the (broken) ClippingPlaneCollection ENU
+        // approach we tried previously.
         // -----------------------------------------------------------------
-        // Clipping disabled while we debug the right Cesium plane convention —
-        // the tileset is showing nothing when clipping is on. Camera framing
-        // alone (90m oblique) achieves the "see your building" experience.
+        await applyBuildingClip(Cesium, tileset, coords);
 
 
-        // Frame the user's house tightly: 90m back at -50° pitch fills the
-        // viewport with the building rather than showing the neighborhood.
-        // No auto-orbit — homeowners want a stable view to confirm "that's
-        // my roof", not a cinematic spin. They can drag to rotate themselves.
+        // LOCK the camera to orbit around the address — pin stays centered.
+        // `lookAtTransform(ENU(target), HPR)` pins the camera reference frame
+        // at the building. User drag → orbit around target (NOT free pan).
+        // Disable translation so user can never wander off the building.
         const { lat, lng } = coords;
         const target = Cesium.Cartesian3.fromDegrees(lng, lat, 0);
-        viewer.scene.camera.lookAt(
-          target,
+        const enuTransform = Cesium.Transforms.eastNorthUpToFixedFrame(target);
+        viewer.scene.camera.lookAtTransform(
+          enuTransform,
           new Cesium.HeadingPitchRange(
             Cesium.Math.toRadians(0),
             Cesium.Math.toRadians(-45),
             220,
           ),
         );
-        // Release the lookAt transform so mouse drag works freely.
-        viewer.scene.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
+        viewer.scene.screenSpaceCameraController.enableTranslate = false;
 
-        // Drop a pulsing neon pin at the address so the user can instantly
-        // see "that's my house" — even when zoomed out by user drag.
+        // Bigger, more visible pin at the address — stays screen-centered.
         viewer.entities.add({
           position: target,
           point: {
-            pixelSize: 14,
+            pixelSize: 28,
             color: Cesium.Color.fromCssColorString("#3DAEFF"),
             outlineColor: Cesium.Color.WHITE,
-            outlineWidth: 2,
+            outlineWidth: 4,
             heightReference: Cesium.HeightReference.NONE,
             disableDepthTestDistance: Number.POSITIVE_INFINITY,
           },
@@ -211,27 +304,35 @@ export default function CesiumRoofViewInner({ coords, address }: Props) {
 
       const target = Cesium.Cartesian3.fromDegrees(coords.lng, coords.lat, 0);
 
-      // Move clipping planes to the new building (inverse ENU per Cesium gotcha)
+      // Rebuild the clipping polygon for the new building. Polygons live in
+      // world ECEF, so unlike planes we just regenerate the collection from
+      // the fresh boundingBox — no modelMatrix to update.
       const tileset = viewer.scene.primitives.get(0);
-      if (tileset && tileset.clippingPlanes) {
-        const enu = Cesium.Transforms.eastNorthUpToFixedFrame(target);
-        tileset.clippingPlanes.modelMatrix = Cesium.Matrix4.inverse(enu, new Cesium.Matrix4());
+      if (tileset) {
+        // Drop the old collection first so a no-coverage address reverts to
+        // the full neighbourhood mesh instead of inheriting the stale clip.
+        tileset.clippingPolygons = undefined;
+        await applyBuildingClip(Cesium, tileset, coords);
       }
 
-      // Move pin to new location
+      // Move pin to new location (same big visible style as initial mount)
       viewer.entities.removeAll();
       viewer.entities.add({
         position: target,
         point: {
-          pixelSize: 14,
+          pixelSize: 28,
           color: Cesium.Color.fromCssColorString("#3DAEFF"),
           outlineColor: Cesium.Color.WHITE,
-          outlineWidth: 2,
+          outlineWidth: 4,
           heightReference: Cesium.HeightReference.NONE,
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
         },
       });
 
+      // Re-lock camera to new building's ENU frame — keeps pin centered.
+      // Release the previous transform first so flyTo can run cleanly, then
+      // immediately re-lock at the new target after the flight completes.
+      viewer.scene.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
       viewer.scene.camera.flyToBoundingSphere(
         new Cesium.BoundingSphere(target, 100),
         {
@@ -241,6 +342,17 @@ export default function CesiumRoofViewInner({ coords, address }: Props) {
             Cesium.Math.toRadians(-45),
             220,
           ),
+          complete: () => {
+            const enu = Cesium.Transforms.eastNorthUpToFixedFrame(target);
+            viewer.scene.camera.lookAtTransform(
+              enu,
+              new Cesium.HeadingPitchRange(
+                Cesium.Math.toRadians(0),
+                Cesium.Math.toRadians(-45),
+                220,
+              ),
+            );
+          },
         },
       );
     })();
@@ -248,6 +360,9 @@ export default function CesiumRoofViewInner({ coords, address }: Props) {
     return () => {
       cancelled = true;
     };
+    // `coords` is referenced as a whole inside applyBuildingClip; the lat/lng
+    // pair is what actually changes between renders, so we depend on those.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [coords.lat, coords.lng, status]);
 
   // Auto-orbit removed per UX brainstorm — homeowners want a stable view

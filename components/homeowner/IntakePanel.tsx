@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { Heating, Goal } from "@/lib/contracts";
 import { tryParseCoords } from "@/lib/parse-coords";
+import { AddressAutocomplete } from "./AddressAutocomplete";
 
 const HEATING_OPTIONS: { value: Heating; label: string; emoji: string }[] = [
   { value: "gas", label: "Gas", emoji: "🔥" },
@@ -96,6 +97,19 @@ export function IntakePanel({ onLocate }: Props = {}) {
     if (address.trim().length >= 5) forwardGeocode(address);
   };
 
+  /**
+   * Called on every keystroke. Coord-bypass MUST run here so pasting
+   * "52.5, 13.4" snaps to the map without waiting for Places to suggest
+   * (Places can't autocomplete numeric coords anyway).
+   */
+  const onAddressChange = (next: string) => {
+    setAddress(next);
+    const parsed = tryParseCoords(next);
+    if (parsed) {
+      onLocate?.({ lat: parsed.lat, lng: parsed.lng }, parsed.formatted);
+    }
+  };
+
   const submit = () => {
     const params = new URLSearchParams({
       address,
@@ -124,13 +138,15 @@ export function IntakePanel({ onLocate }: Props = {}) {
         <label htmlFor="address" className="text-[10px] uppercase tracking-wider text-[#9BA3AF]">
           Address
         </label>
-        <input
+        <AddressAutocomplete
           id="address"
-          type="text"
           value={address}
-          onChange={(e) => setAddress(e.target.value)}
+          onChange={onAddressChange}
+          onPlaceSelected={(coords, formatted) => {
+            setAddress(formatted);
+            onLocate?.(coords, formatted);
+          }}
           onBlur={onAddressBlur}
-          onKeyDown={(e) => { if (e.key === "Enter") { e.currentTarget.blur(); } }}
           placeholder="Enter address or lat,lng..."
           autoComplete="off"
           className="w-full rounded-lg border border-[#2A3038] bg-[#12161C] px-4 py-2.5 text-sm text-[#F7F8FA] placeholder:text-[#5B6470] focus:outline-none focus:border-[#3DAEFF] focus:ring-2 focus:ring-[#3DAEFF]/30 transition-all"

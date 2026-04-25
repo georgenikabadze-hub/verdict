@@ -1,6 +1,6 @@
 "use client";
 
-export type LayerMode = "photoreal" | "roofplan" | "map";
+export type LayerMode = "photoreal" | "heatmap" | "map";
 
 interface Props {
   value: LayerMode;
@@ -9,7 +9,7 @@ interface Props {
 
 const OPTIONS: { value: LayerMode; label: string }[] = [
   { value: "photoreal", label: "3D View" },
-  { value: "roofplan", label: "Roof Plan" },
+  { value: "heatmap",   label: "Heatmap" },
   { value: "map",       label: "Map" },
 ];
 

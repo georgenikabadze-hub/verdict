@@ -6,6 +6,9 @@ import { CesiumRoofView } from "./CesiumRoofView";
 import { RuhrCinematic } from "./RuhrCinematic";
 import { LiveRoofFacts } from "./LiveRoofFacts";
 import { InstallerApprovedToast } from "./InstallerApprovedToast";
+import { LayerSwitcher, type LayerMode } from "./LayerSwitcher";
+import { HeatmapView } from "./HeatmapView";
+import { RoofPreview } from "./RoofPreview";
 import type { RoofSegment } from "@/lib/contracts";
 
 interface RoofFactsState {
@@ -22,6 +25,7 @@ export function HomeShell() {
   const [address, setAddress] = useState<string | null>(null);
   const [roofFacts, setRoofFacts] = useState<RoofFactsState | null>(null);
   const [loadingRoof, setLoadingRoof] = useState(false);
+  const [layerMode, setLayerMode] = useState<LayerMode>("photoreal");
 
   useEffect(() => {
     if (!coords) {
@@ -63,7 +67,12 @@ export function HomeShell() {
         {/* LEFT */}
         <div className="relative h-[42vh] lg:h-auto bg-[#0A0E1A] border-b lg:border-b-0 lg:border-r border-[#1A1F2A] overflow-hidden">
           {coords ? (
-            <CesiumRoofView coords={coords} address={address} />
+            <>
+              {layerMode === "photoreal" && <CesiumRoofView coords={coords} address={address} />}
+              {layerMode === "heatmap"   && <HeatmapView coords={coords} address={address} />}
+              {layerMode === "map"       && <RoofPreview coords={coords} address={address} />}
+              <LayerSwitcher value={layerMode} onChange={setLayerMode} />
+            </>
           ) : (
             <RuhrCinematic />
           )}

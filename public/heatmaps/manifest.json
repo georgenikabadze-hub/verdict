@@ -1,0 +1,85 @@
+{
+  "generatedAt": "2026-04-25T19:24:32.089Z",
+  "radiusMeters": 50,
+  "entries": [
+    {
+      "label": "Reichstag, Berlin",
+      "lat": 52.516274,
+      "lng": 13.377704,
+      "latKey": "52.516",
+      "lngKey": "13.378",
+      "file": "/heatmaps/annual_52.516_13.378.png",
+      "width": 1000,
+      "height": 1001,
+      "bytes": 89673,
+      "minFlux": 261,
+      "maxFlux": 1167
+    },
+    {
+      "label": "Brandenburg Gate, Berlin",
+      "lat": 52.516275,
+      "lng": 13.3777,
+      "latKey": "52.516",
+      "lngKey": "13.378",
+      "file": "/heatmaps/annual_52.516_13.378.png",
+      "width": 1001,
+      "height": 1001,
+      "bytes": 90364,
+      "minFlux": 261,
+      "maxFlux": 1167
+    },
+    {
+      "label": "Im Winkel 37, Berlin",
+      "lat": 52.418,
+      "lng": 13.164,
+      "latKey": "52.418",
+      "lngKey": "13.164",
+      "file": "/heatmaps/annual_52.418_13.164.png",
+      "width": 1001,
+      "height": 1001,
+      "bytes": 107989,
+      "minFlux": 257,
+      "maxFlux": 1148
+    },
+    {
+      "label": "Hamburg city centre",
+      "lat": 53.5511,
+      "lng": 9.9937,
+      "latKey": "53.551",
+      "lngKey": "9.994",
+      "file": "/heatmaps/annual_53.551_9.994.png",
+      "width": 997,
+      "height": 1003,
+      "bytes": 91589,
+      "minFlux": 243,
+      "maxFlux": 1071
+    },
+    {
+      "label": "Munich Marienplatz",
+      "lat": 48.1374,
+      "lng": 11.5755,
+      "latKey": "48.137",
+      "lngKey": "11.575",
+      "file": "/heatmaps/annual_48.137_11.575.png",
+      "width": 996,
+      "height": 1002,
+      "bytes": 82817,
+      "minFlux": 277,
+      "maxFlux": 1240
+    },
+    {
+      "label": "Ruhr (Ruhr.glb match)",
+      "lat": 51.145507,
+      "lng": 7.109045,
+      "latKey": "51.146",
+      "lngKey": "7.109",
+      "file": "/heatmaps/annual_51.146_7.109.png",
+      "width": 1001,
+      "height": 1001,
+      "bytes": 84504,
+      "minFlux": 270,
+      "maxFlux": 1104
+    }
+  ],
+  "failures": []
+}

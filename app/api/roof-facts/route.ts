@@ -12,10 +12,26 @@ interface SolarPotential {
   }>;
 }
 
+interface LatLng {
+  latitude: number;
+  longitude: number;
+}
+
+interface BoundingBox {
+  sw: LatLng;
+  ne: LatLng;
+}
+
 interface BuildingInsights {
   name: string;
   imageryDate: { year: number; month: number; day: number };
   solarPotential: SolarPotential;
+  // Optional because the cached fixtures predate the field — the LIVE Google
+  // Solar API (`buildingInsights:findClosest`) always returns it. Used by the
+  // Cesium client to build a ClippingPolygonCollection that isolates the
+  // building from the surrounding mesh.
+  // https://developers.google.com/maps/documentation/solar/reference/rest/v1/buildingInsights/findClosest#BuildingInsights
+  boundingBox?: BoundingBox;
 }
 
 export async function GET(req: NextRequest) {
@@ -71,10 +87,17 @@ export async function GET(req: NextRequest) {
         ? parseFloat(wholeRoofArea.toFixed(1))
         : parseFloat(segments.reduce((acc, s) => acc + s.areaMeters2, 0).toFixed(1));
 
+    // Pass `boundingBox` straight through (sw/ne latLng pair). The Cesium
+    // client uses it to build a ClippingPolygonCollection so the photoreal
+    // tileset only renders this one building. Undefined when the fixture
+    // path is hit — the client falls back to "no clipping, render everything".
+    const boundingBox = (bi as BuildingInsights | null)?.boundingBox;
+
     return NextResponse.json({
       segments,
       totalAreaM2,
       imageryDate: bi?.imageryDate,
+      boundingBox,
       source: apiStatus.source,
       status: apiStatus.status,
       message: apiStatus.message,

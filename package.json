@@ -11,7 +11,8 @@
     "test": "vitest run",
     "test:e2e": "playwright test",
     "postinstall": "node scripts/copy-cesium.mjs",
-    "prebake": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/csv_to_json.ts"
+    "prebake": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/csv_to_json.ts",
+    "prebake:heatmaps": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/bake-heatmaps.ts"
   },
   "dependencies": {
     "@googlemaps/js-api-loader": "^2.0.2",
@@ -19,8 +20,8 @@
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.6.0",
     "@tanstack/react-query": "^5.100.3",
-    "class-variance-authority": "^0.7.1",
     "cesium": "^1.140.0",
+    "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "coordinate-parser": "^1.0.7",
     "lucide-react": "^1.11.0",
@@ -46,7 +47,9 @@
     "@vitejs/plugin-react": "^6.0.1",
     "eslint": "^9",
     "eslint-config-next": "15.5.15",
+    "geotiff": "^3.0.5",
     "happy-dom": "^20.9.0",
+    "sharp": "^0.34.5",
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "^4.1.5"

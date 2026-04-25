@@ -74,18 +74,11 @@ function tryParseJson(text: string): unknown {
  * to convert; if that fails we just omit responseSchema and rely on the prompt
  * to coerce the model to valid JSON.
  */
-function zodToResponseSchema(schema: ZodTypeAny): unknown | undefined {
-  try {
-    // Optional: only if the user has zod-to-json-schema installed. We avoid
-    // adding a hard dep — fall back to undefined if it isn't available.
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const mod = require("zod-to-json-schema") as {
-      zodToJsonSchema: (s: ZodTypeAny) => unknown;
-    };
-    return mod.zodToJsonSchema(schema);
-  } catch {
-    return undefined;
-  }
+function zodToResponseSchema(_schema: ZodTypeAny): unknown | undefined {
+  // We rely on `responseMimeType: "application/json"` + prompt coercion to
+  // get valid JSON back from Gemini. Skipping the responseSchema field keeps
+  // bundle small and avoids an optional dep — Gemini handles JSON output well.
+  return undefined;
 }
 
 async function postOnce(
