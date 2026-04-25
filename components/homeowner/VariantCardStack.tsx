@@ -29,8 +29,17 @@ export function VariantCardStack({ variants, onSelect }: Props) {
         return (
           <article
             key={v.id}
+            tabIndex={0}
+            role="button"
+            aria-pressed={isSelected}
             onClick={() => select(v.id)}
-            className={`relative cursor-pointer rounded-xl border transition-all ${
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                select(v.id);
+              }
+            }}
+            className={`relative cursor-pointer rounded-xl border transition-all focus:outline-none focus:ring-2 focus:ring-[#3DAEFF]/40 ${
               isSelected
                 ? "border-[#3DAEFF] bg-[#12161C]"
                 : "border-[#2A3038] bg-[#12161C]/50 hover:border-[#3DAEFF]/40"
@@ -79,21 +88,21 @@ export function VariantCardStack({ variants, onSelect }: Props) {
             {/* Component dots */}
             <div className="flex items-center gap-3 px-5 py-3 text-xs text-[#9BA3AF]">
               <span className="flex items-center gap-1.5">
-                <span className="h-1.5 w-1.5 rounded-full bg-[#62E6A7]" /> PV
+                <span className="h-1.5 w-1.5 rounded-md bg-[#62E6A7]" /> PV
               </span>
               {v.bom.battery && (
                 <span className="flex items-center gap-1.5">
-                  <span className="h-1.5 w-1.5 rounded-full bg-[#62E6A7]" /> {v.bom.battery.kwh} kWh
+                  <span className="h-1.5 w-1.5 rounded-md bg-[#62E6A7]" /> {v.bom.battery.kwh} kWh
                 </span>
               )}
               {v.bom.heatPump && (
                 <span className="flex items-center gap-1.5">
-                  <span className="h-1.5 w-1.5 rounded-full bg-[#F2B84B]" /> Heat pump
+                  <span className="h-1.5 w-1.5 rounded-md bg-[#F2B84B]" /> Heat pump
                 </span>
               )}
               {v.bom.wallbox && (
                 <span className="flex items-center gap-1.5">
-                  <span className="h-1.5 w-1.5 rounded-full bg-[#62E6A7]" /> Wallbox
+                  <span className="h-1.5 w-1.5 rounded-md bg-[#62E6A7]" /> Wallbox
                 </span>
               )}
             </div>

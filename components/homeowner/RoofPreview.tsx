@@ -75,7 +75,7 @@ export function RoofPreview({ coords, address }: Props) {
         <>
           <PlaceholderSvg />
           <div className="absolute top-4 left-4 flex items-center gap-2 rounded-md border border-[#3DAEFF]/40 bg-[#0A0E1A]/80 backdrop-blur px-3 py-1.5 text-xs">
-            <span className="inline-block h-3 w-3 rounded-full border-2 border-[#3DAEFF]/30 border-t-[#3DAEFF] animate-spin" />
+            <span className="inline-block h-3 w-3 rounded-md border-2 border-[#3DAEFF]/30 border-t-[#3DAEFF] animate-spin" />
             <span className="text-[#F7F8FA]">Loading aerial view…</span>
           </div>
         </>
@@ -86,7 +86,7 @@ export function RoofPreview({ coords, address }: Props) {
         <>
           <PlaceholderSvg />
           <div className="absolute top-4 left-4 flex items-center gap-2 rounded-md border border-[#F2B84B]/40 bg-[#0A0E1A]/80 backdrop-blur px-3 py-1.5 text-xs">
-            <span className="inline-block h-2 w-2 rounded-full bg-[#F2B84B]" />
+            <span className="inline-block h-2 w-2 rounded-md bg-[#F2B84B]" />
             <span className="text-[#F7F8FA]">Satellite unavailable</span>
           </div>
         </>
@@ -98,8 +98,8 @@ export function RoofPreview({ coords, address }: Props) {
           <div className="absolute inset-0 bg-gradient-to-tr from-[#0A0E1A]/55 via-transparent to-[#0A0E1A]/30" />
           <div className="absolute top-4 left-4 flex items-center gap-2 rounded-md border border-[#62E6A7]/40 bg-[#0A0E1A]/80 backdrop-blur px-3 py-1.5 text-xs">
             <span className="relative flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#62E6A7] opacity-60" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-[#62E6A7]" />
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-md bg-[#62E6A7] opacity-60" />
+              <span className="relative inline-flex h-2 w-2 rounded-md bg-[#62E6A7]" />
             </span>
             <span className="text-[#F7F8FA]">Live satellite</span>
           </div>

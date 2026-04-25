@@ -20,7 +20,7 @@ export function SendToInstaller({ leadId }: Props) {
   if (state === "sent") {
     return (
       <div className="rounded-xl border border-[#62E6A7]/40 bg-[#12161C] p-5 sm:p-6 flex flex-col items-center text-center gap-3">
-        <div className="rounded-full bg-[#62E6A7]/15 p-3">
+        <div className="rounded-md bg-[#62E6A7]/15 p-3">
           <Check size={28} className="text-[#62E6A7]" strokeWidth={3} />
         </div>
         <div>
@@ -44,7 +44,7 @@ export function SendToInstaller({ leadId }: Props) {
       >
         {state === "sending" ? (
           <>
-            <span className="inline-block h-4 w-4 rounded-full border-2 border-[#0A0E1A]/30 border-t-[#0A0E1A] animate-spin" />
+            <span className="inline-block h-4 w-4 rounded-md border-2 border-[#0A0E1A]/30 border-t-[#0A0E1A] animate-spin" />
             Sending Verdict packet...
           </>
         ) : (

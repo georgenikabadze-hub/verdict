@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Pencil, RefreshCw, Check } from "lucide-react";
+import { RefreshCw, Check } from "lucide-react";
 
 type BomLine = { label: string; value: string };
 
@@ -83,7 +83,7 @@ export function InstallerReview() {
   if (approved) {
     return (
       <div className="flex flex-col items-center justify-center text-center gap-4 py-16">
-        <div className="rounded-full bg-[#62E6A7]/15 p-4">
+        <div className="rounded-md bg-[#62E6A7]/15 p-4">
           <Check size={36} className="text-[#62E6A7]" strokeWidth={3} />
         </div>
         <h2 className="text-2xl font-semibold">Approved &middot; homeowner notified</h2>
@@ -128,26 +128,20 @@ export function InstallerReview() {
         ))}
       </div>
 
-      {/* Editable BoM table */}
+      {/* BoM table */}
       <div className="flex flex-col gap-2">
         <span className="text-xs uppercase tracking-wider text-[#9BA3AF]">Bill of Materials</span>
         <div className="rounded-lg border border-[#2A3038] bg-[#12161C] divide-y divide-[#1A1F2A]">
           {v.bomLines.map((line) => (
             <div key={line.label} className="flex items-center justify-between px-4 py-3">
               <div className="flex flex-col">
-                <span className="text-[11px] uppercase tracking-wider text-[#5B6470]">{line.label}</span>
+                <span className="text-[11px] uppercase tracking-wider text-[#9BA3AF]">{line.label}</span>
                 <span className="text-sm">{line.value}</span>
               </div>
-              <button
-                type="button"
-                aria-label={`Edit ${line.label}`}
-                className="rounded-md p-1.5 text-[#5B6470] hover:bg-[#1A1F2A] hover:text-[#3DAEFF] transition-colors"
-              >
-                <Pencil size={14} />
-              </button>
             </div>
           ))}
         </div>
+        <span className="text-[10px] text-[#5B6470]">Tap Recalculate to swap brands and re-run the sizer</span>
       </div>
 
       {/* Cited projects */}

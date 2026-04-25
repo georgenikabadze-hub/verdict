@@ -122,7 +122,7 @@ export default async function QuotePage({
         <header className="flex flex-col gap-2">
           <div className="flex items-center gap-2 text-xs">
             <span className="flex items-center gap-1.5 rounded border border-[#62E6A7]/40 bg-[#0A0E1A] px-2 py-0.5 text-[#62E6A7]">
-              <span className="h-1.5 w-1.5 rounded-full bg-[#62E6A7]" />
+              <span className="h-1.5 w-1.5 rounded-md bg-[#62E6A7]" />
               {liveOrCached === "live" ? "Measured live" : "Estimated"}
             </span>
             <span className="text-[#5B6470]">·</span>

@@ -28,6 +28,7 @@ export function IntakePanel({ onLocate }: Props = {}) {
   const [goal, setGoal] = useState<Goal>("lower_bill");
   const [locating, setLocating] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
+  const [resolving, setResolving] = useState(false);
 
   const useMyLocation = () => {
     setLocationError(null);
@@ -77,6 +78,7 @@ export function IntakePanel({ onLocate }: Props = {}) {
       return;
     }
 
+    setResolving(true);
     try {
       const res = await fetch(`/api/forward-geocode?q=${encodeURIComponent(q)}`);
       const data = await res.json();
@@ -85,6 +87,8 @@ export function IntakePanel({ onLocate }: Props = {}) {
       }
     } catch {
       // silent fail — input still works for the user
+    } finally {
+      setResolving(false);
     }
   };
 
@@ -131,14 +135,22 @@ export function IntakePanel({ onLocate }: Props = {}) {
           autoComplete="off"
           className="w-full rounded-lg border border-[#2A3038] bg-[#12161C] px-4 py-2.5 text-sm text-[#F7F8FA] placeholder:text-[#5B6470] focus:outline-none focus:border-[#3DAEFF] focus:ring-2 focus:ring-[#3DAEFF]/30 transition-all"
         />
-        <button
-          type="button"
-          onClick={useMyLocation}
-          disabled={locating}
-          className="self-start text-xs text-[#9BA3AF] hover:text-[#3DAEFF] transition-colors disabled:cursor-wait disabled:text-[#5B6470]"
-        >
-          {locating ? "⌖ Locating..." : "⌖ Use my location"}
-        </button>
+        <div className="flex items-center justify-between">
+          <button
+            type="button"
+            onClick={useMyLocation}
+            disabled={locating}
+            className="text-xs text-[#9BA3AF] hover:text-[#3DAEFF] transition-colors disabled:cursor-wait disabled:text-[#5B6470]"
+          >
+            {locating ? "⌖ Locating..." : "⌖ Use my location"}
+          </button>
+          {resolving && (
+            <span className="flex items-center gap-1.5 text-[11px] text-[#9BA3AF]">
+              <span className="inline-block h-2.5 w-2.5 rounded-md border-2 border-[#3DAEFF]/30 border-t-[#3DAEFF] animate-spin" />
+              Resolving address…
+            </span>
+          )}
+        </div>
         {locationError && (
           <p className="text-[11px] text-[#F2B84B]">{locationError}</p>
         )}
@@ -188,7 +200,7 @@ export function IntakePanel({ onLocate }: Props = {}) {
       {/* Heating segmented */}
       <div className="flex flex-col gap-2">
         <span className="text-xs uppercase tracking-wider text-[#9BA3AF]">Heating system</span>
-        <div className="grid grid-cols-4 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           {HEATING_OPTIONS.map((opt) => (
             <button
               key={opt.value}
