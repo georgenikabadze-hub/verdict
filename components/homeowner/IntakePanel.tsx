@@ -15,7 +15,11 @@ const GOAL_OPTIONS: { value: Goal; label: string; sub: string }[] = [
   { value: "independence", label: "Become independent", sub: "Maximise autarky" },
 ];
 
-export function IntakePanel() {
+interface Props {
+  onLocate?: (coords: { lat: number; lng: number }, address: string) => void;
+}
+
+export function IntakePanel({ onLocate }: Props = {}) {
   const [address, setAddress] = useState("");
   const [bill, setBill] = useState(120);
   const [ev, setEv] = useState(false);
@@ -40,6 +44,7 @@ export function IntakePanel() {
           const data = await res.json();
           if (data.address) {
             setAddress(data.address);
+            onLocate?.({ lat: data.lat, lng: data.lng }, data.address);
           } else {
             setLocationError(data.error ?? "Couldn't find an address near you.");
           }
@@ -59,6 +64,24 @@ export function IntakePanel() {
       },
       { enableHighAccuracy: true, timeout: 7_000, maximumAge: 60_000 },
     );
+  };
+
+  // Forward-geocode when the user pauses typing (debounced)
+  const forwardGeocode = async (q: string) => {
+    if (q.trim().length < 5) return;
+    try {
+      const res = await fetch(`/api/forward-geocode?q=${encodeURIComponent(q)}`);
+      const data = await res.json();
+      if (data.lat && data.lng) {
+        onLocate?.({ lat: data.lat, lng: data.lng }, data.address);
+      }
+    } catch {
+      // silent fail — input still works for the user
+    }
+  };
+
+  const onAddressBlur = () => {
+    if (address.trim().length >= 5) forwardGeocode(address);
   };
 
   const submit = () => {
@@ -94,6 +117,8 @@ export function IntakePanel() {
           type="text"
           value={address}
           onChange={(e) => setAddress(e.target.value)}
+          onBlur={onAddressBlur}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.currentTarget.blur(); } }}
           placeholder="Enter your address..."
           autoComplete="off"
           className="w-full rounded-lg border border-[#2A3038] bg-[#12161C] px-5 py-3.5 text-base text-[#F7F8FA] placeholder:text-[#5B6470] focus:outline-none focus:border-[#3DAEFF] focus:ring-2 focus:ring-[#3DAEFF]/30 transition-all"
