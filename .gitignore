@@ -92,3 +92,4 @@ logs/
 tmp/
 .cache/
 coverage/
+.vercel
