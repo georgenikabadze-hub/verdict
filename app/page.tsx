@@ -21,11 +21,7 @@ export default function Home() {
           Based on 1,277 real Reonic projects.
         </p>
 
-        <form
-          className="mt-10 w-full max-w-xl flex flex-col gap-3"
-          action="/api/quote"
-          method="get"
-        >
+        <div className="mt-10 w-full max-w-xl flex flex-col gap-3">
           <label className="sr-only" htmlFor="address">Your address</label>
           <input
             id="address"
@@ -41,7 +37,10 @@ export default function Home() {
           >
             ⌖ Use my location
           </button>
-        </form>
+          <p className="self-center text-xs text-[#5B6470] mt-2">
+            Address autocomplete + 3D house reveal arriving in Sprint 3.
+          </p>
+        </div>
 
         {/* Footer signal */}
         <div className="absolute bottom-6 right-6 flex items-center gap-2 text-xs text-[#9BA3AF]">
