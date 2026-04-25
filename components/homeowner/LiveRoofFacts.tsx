@@ -3,10 +3,14 @@
 import { RoofSegment } from "@/lib/contracts";
 
 interface Props {
-  segments: RoofSegment[];           // from contracts.ts — pitch, azimuth, area, sunshine
-  totalAreaM2?: number;              // optional sum, derive from segments if not provided
-  imageryDate?: { year: number; month: number; day: number };  // from Solar API
-  source: "live" | "cached" | "mock"; // controls the badge color
+  segments: RoofSegment[];
+  totalAreaM2?: number;
+  imageryDate?: { year: number; month: number; day: number };
+  source: "live" | "cached" | "mock";
+  /** "ok" = real result; "error"/"timeout" = upstream failure (changes empty-state copy) */
+  status?: "ok" | "error" | "timeout";
+  /** Human-readable reason when segments is empty */
+  message?: string;
   loading?: boolean;
 }
 
@@ -15,6 +19,8 @@ export function LiveRoofFacts({
   totalAreaM2,
   imageryDate,
   source,
+  status = "ok",
+  message,
   loading = false,
 }: Props) {
   const area = totalAreaM2 ?? segments.reduce((acc, s) => acc + s.areaMeters2, 0);
@@ -62,9 +68,21 @@ export function LiveRoofFacts({
   }
 
   if (segments.length === 0) {
+    const isCoverageGap = status === "ok"; // server distinguishes 404 from real errors
+    const headline = isCoverageGap
+      ? "No live roof measurement at this location"
+      : "Roof measurement temporarily unavailable";
+    const subline =
+      message ?? (isCoverageGap ? "Google Solar API has no building data here" : "Try again in a moment");
     return (
-      <div className="flex h-[52px] w-full items-center rounded-md border border-[#2A3038] bg-[#12161C]/85 px-4 backdrop-blur">
-        <span className="text-xs text-[#9BA3AF]">No roof data available — using estimates</span>
+      <div className="flex h-[52px] w-full items-center justify-between rounded-md border border-[#F2B84B]/40 bg-[#12161C]/85 px-4 backdrop-blur">
+        <div className="flex items-center gap-2">
+          <span className="h-2 w-2 rounded-md bg-[#F2B84B]" />
+          <span className="text-xs text-[#F7F8FA]">{headline}</span>
+        </div>
+        <span className="text-[10px] uppercase tracking-wider text-[#9BA3AF] truncate ml-2 max-w-[60%] text-right">
+          {subline}
+        </span>
       </div>
     );
   }

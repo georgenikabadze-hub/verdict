@@ -80,7 +80,7 @@ export function IntakePanel({ onLocate }: Props = {}) {
     try {
       const res = await fetch(`/api/forward-geocode?q=${encodeURIComponent(q)}`);
       const data = await res.json();
-      if (data.lat && data.lng) {
+      if (typeof data.lat === "number" && typeof data.lng === "number") {
         onLocate?.({ lat: data.lat, lng: data.lng }, data.address);
       }
     } catch {

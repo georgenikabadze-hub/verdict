@@ -20,7 +20,7 @@ interface MockVariant {
 }
 
 const INITIAL: MockVariant = {
-  id: "lead-conrad-001",
+  id: "demo-conrad",
   customerName: "Conrad Smith",
   city: "Hamburg",
   totalEur: 22100,
@@ -46,6 +46,7 @@ function jitter(n: number, pct: number) {
 export function InstallerReview() {
   const [v, setV] = useState<MockVariant>(INITIAL);
   const [approved, setApproved] = useState(false);
+  const [approving, setApproving] = useState(false);
 
   const recalc = () => {
     setV((prev) => ({
@@ -56,6 +57,27 @@ export function InstallerReview() {
       marginPct:         Math.round(jitter(prev.marginPct, 0.05)),
       confidence:        +Math.min(0.99, jitter(prev.confidence, 0.04)).toFixed(2),
     }));
+  };
+
+  const approve = async () => {
+    setApproving(true);
+    try {
+      await fetch(`/api/leads/${v.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "approve",
+          installerName: "Müller Solartechnik",
+          installerLogoEmoji: "☀",
+          finalBom: v.bomLines,
+        }),
+      });
+      setApproved(true);
+    } catch {
+      setApproved(true); // optimistic — local UI still flips
+    } finally {
+      setApproving(false);
+    }
   };
 
   if (approved) {
@@ -154,10 +176,20 @@ export function InstallerReview() {
         </button>
         <button
           type="button"
-          onClick={() => setApproved(true)}
-          className="flex items-center justify-center gap-2 w-full rounded-lg bg-[#3DAEFF] px-5 py-3 text-sm font-semibold text-[#0A0E1A] hover:bg-[#2EA1F0] transition-colors"
+          onClick={approve}
+          disabled={approving}
+          className="flex items-center justify-center gap-2 w-full rounded-lg bg-[#3DAEFF] px-5 py-3 text-sm font-semibold text-[#0A0E1A] hover:bg-[#2EA1F0] disabled:opacity-60 disabled:cursor-wait transition-colors"
         >
-          <Check size={16} strokeWidth={3} /> Approve and send
+          {approving ? (
+            <>
+              <span className="inline-block h-4 w-4 rounded-md border-2 border-[#0A0E1A]/30 border-t-[#0A0E1A] animate-spin" />
+              Sending to homeowner…
+            </>
+          ) : (
+            <>
+              <Check size={16} strokeWidth={3} /> Approve and send
+            </>
+          )}
         </button>
       </div>
     </div>

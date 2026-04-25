@@ -5,6 +5,7 @@ import { IntakePanel } from "./IntakePanel";
 import { RoofPreview } from "./RoofPreview";
 import { RoofMap3D } from "./RoofMap3D";
 import { LiveRoofFacts } from "./LiveRoofFacts";
+import { InstallerApprovedToast } from "./InstallerApprovedToast";
 import type { RoofSegment } from "@/lib/contracts";
 
 interface RoofFactsState {
@@ -12,6 +13,8 @@ interface RoofFactsState {
   totalAreaM2: number;
   imageryDate?: { year: number; month: number; day: number };
   source: "live" | "cached" | "mock";
+  status?: "ok" | "error" | "timeout";
+  message?: string;
 }
 
 export function HomeShell() {
@@ -26,20 +29,20 @@ export function HomeShell() {
       return;
     }
 
-    const fetchRoofFacts = async () => {
-      setLoadingRoof(true);
-      try {
-        const res = await fetch(`/api/roof-facts?lat=${coords.lat}&lng=${coords.lng}`);
-        const data = await res.json();
-        setRoofFacts(data);
-      } catch (err) {
-        console.error("Failed to fetch roof facts:", err);
-      } finally {
-        setLoadingRoof(false);
-      }
-    };
+    const controller = new AbortController();
+    setLoadingRoof(true);
 
-    fetchRoofFacts();
+    fetch(`/api/roof-facts?lat=${coords.lat}&lng=${coords.lng}`, {
+      signal: controller.signal,
+    })
+      .then((r) => r.json())
+      .then((data) => setRoofFacts(data))
+      .catch(() => {
+        // ignore aborts AND silent failures — UI still shows last data
+      })
+      .finally(() => setLoadingRoof(false));
+
+    return () => controller.abort();
   }, [coords]);
 
   return (
@@ -73,6 +76,8 @@ export function HomeShell() {
                 totalAreaM2={roofFacts?.totalAreaM2}
                 imageryDate={roofFacts?.imageryDate}
                 source={roofFacts?.source ?? "mock"}
+                status={roofFacts?.status}
+                message={roofFacts?.message}
                 loading={loadingRoof}
               />
             )}
@@ -95,6 +100,9 @@ export function HomeShell() {
           />
         </div>
       </section>
+
+      {/* Push notification when installer approves the lead (polls every 2s) */}
+      <InstallerApprovedToast />
     </main>
   );
 }

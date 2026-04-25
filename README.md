@@ -29,7 +29,7 @@ cp .env.example .env.local   # fill in your own keys (never commit them)
 - [Plan](./docs/PLAN.md) — full concept, pitch, build stages, wireframes, and pre-mortem.
 - [Sprint](./docs/SPRINT.md) — sprint cadence and delivery checkpoints.
 - [Bootstrap](./docs/BOOTSTRAP.md) — cold-start protocol and AI workstream ownership.
-- [Status](./STATUS.md) — current build state and next handoff.
+- [Status](./docs/STATUS.md) — current build state and next handoff.
 - [Contributing](./docs/CONTRIBUTING.md) — contributor ownership map.
 - [Landing mockup](./docs/landing-mockup.png) — visual reference.
 

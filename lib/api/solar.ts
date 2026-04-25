@@ -36,26 +36,41 @@ function latLngKey(lat: number, lng: number): string {
 }
 
 async function loadFixture(api: "solar" | "datalayers", lat: number, lng: number) {
+  // Only return a fixture that matches the SPECIFIC lat/lng. Never return a
+  // generic landmark fixture as a fallback — that lies about the user's roof
+  // (e.g. returning Brandenburg Gate's 818 m² for an address in Tbilisi).
   const key = latLngKey(lat, lng);
-  // Try the precise key, then named landmark fallbacks shipped with the repo.
-  const candidates = [key, "brandenburg-gate", "reichstag"];
-
-  for (const c of candidates) {
-    try {
-      const mod = await import(`../../data/fixtures/cached/${api}_${c}.json`);
-      const data = (mod.default ?? mod) as Record<string, unknown>;
-      if (data && typeof data === "object") return data;
-    } catch {
-      // try next candidate
-    }
+  try {
+    const mod = await import(`../../data/fixtures/cached/${api}_${key}.json`);
+    const data = (mod.default ?? mod) as Record<string, unknown>;
+    if (data && typeof data === "object") return data;
+  } catch {
+    // No fixture for this exact location — caller will surface "no coverage".
   }
   return null;
+}
+
+/**
+ * Marker error class that signals "Solar API has no building data at these
+ * coordinates" — distinct from network/auth/quota failures. The caller uses
+ * this to decide whether to render "no coverage here" vs "try again later".
+ */
+export class NoSolarCoverageError extends Error {
+  constructor(message = "No Solar API coverage at these coordinates") {
+    super(message);
+    this.name = "NoSolarCoverageError";
+  }
 }
 
 async function fetchJson(url: string, signal: AbortSignal): Promise<unknown> {
   const res = await fetch(url, { signal });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
+    // Solar API returns 404 + "Requested entity was not found" when the address
+    // is outside coverage. Distinguish that from real errors (auth, quota, 5xx).
+    if (res.status === 404) {
+      throw new NoSolarCoverageError();
+    }
     throw new Error(`Solar API HTTP ${res.status}: ${text.slice(0, 200)}`);
   }
   return res.json();
@@ -76,20 +91,43 @@ export async function getBuildingInsights(
   const fallback = async (): Promise<unknown> => {
     controller.abort();
     const cached = await loadFixture("solar", lat, lng);
-    if (cached) return cached;
-    throw new Error("No cached Solar buildingInsights fixture available");
+    return cached ?? null;
   };
 
-  const out = await withTimeout(live, DEFAULT_TIMEOUT_MS, fallback);
+  let noCoverage = false;
+  let fetchError: string | undefined;
+  const safeLive = live.catch((e) => {
+    if (e instanceof NoSolarCoverageError) {
+      noCoverage = true;
+      return null;
+    }
+    fetchError = e instanceof Error ? e.message : String(e);
+    return null;
+  });
+
+  const out = await withTimeout(safeLive, DEFAULT_TIMEOUT_MS, fallback);
+
+  // Decide a HONEST status. Three possible outcomes:
+  //   - Live data returned (out.result truthy, no error flagged)  → live + ok
+  //   - 404/no-coverage from Solar API                            → mock + ok + clear msg
+  //   - Other error (auth, quota, 5xx, network, timeout)          → cached/mock + error
+  let source: ApiStatus["source"] = out.source;
+  let status: ApiStatus["status"] = out.status;
+  let message: string | undefined = out.message;
+
+  if (noCoverage) {
+    source = "mock";
+    status = "ok";
+    message = "Google Solar API has no building data at these coordinates";
+  } else if (fetchError && !out.result) {
+    source = out.source === "live" ? "mock" : out.source;
+    status = "error";
+    message = fetchError;
+  }
 
   return {
     data: out.result,
-    apiStatus: {
-      source: out.source,
-      status: out.status,
-      latencyMs: out.latencyMs,
-      message: out.message,
-    },
+    apiStatus: { source, status, latencyMs: out.latencyMs, message },
   };
 }
 
@@ -111,8 +149,7 @@ export async function getDataLayers(
   const fallback = async (): Promise<unknown> => {
     controller.abort();
     const cached = await loadFixture("datalayers", lat, lng);
-    if (cached) return cached;
-    throw new Error("No cached Solar dataLayers fixture available");
+    return cached ?? null;
   };
 
   const out = await withTimeout(live, DEFAULT_TIMEOUT_MS, fallback);
