@@ -21,6 +21,45 @@ export function IntakePanel() {
   const [ev, setEv] = useState(false);
   const [heating, setHeating] = useState<Heating>("gas");
   const [goal, setGoal] = useState<Goal>("lower_bill");
+  const [locating, setLocating] = useState(false);
+  const [locationError, setLocationError] = useState<string | null>(null);
+
+  const useMyLocation = () => {
+    setLocationError(null);
+    if (!("geolocation" in navigator)) {
+      setLocationError("Your browser doesn't support geolocation.");
+      return;
+    }
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        try {
+          const res = await fetch(
+            `/api/reverse-geocode?lat=${pos.coords.latitude}&lng=${pos.coords.longitude}`,
+          );
+          const data = await res.json();
+          if (data.address) {
+            setAddress(data.address);
+          } else {
+            setLocationError(data.error ?? "Couldn't find an address near you.");
+          }
+        } catch {
+          setLocationError("Couldn't reach the geocoding service.");
+        } finally {
+          setLocating(false);
+        }
+      },
+      (err) => {
+        setLocating(false);
+        setLocationError(
+          err.code === err.PERMISSION_DENIED
+            ? "Location permission denied — type your address instead."
+            : "Couldn't get your location. Try typing your address.",
+        );
+      },
+      { enableHighAccuracy: true, timeout: 7_000, maximumAge: 60_000 },
+    );
+  };
 
   const submit = () => {
     const params = new URLSearchParams({
@@ -61,10 +100,15 @@ export function IntakePanel() {
         />
         <button
           type="button"
-          className="self-start text-sm text-[#9BA3AF] hover:text-[#3DAEFF] transition-colors"
+          onClick={useMyLocation}
+          disabled={locating}
+          className="self-start text-sm text-[#9BA3AF] hover:text-[#3DAEFF] transition-colors disabled:cursor-wait disabled:text-[#5B6470]"
         >
-          ⌖ Use my location
+          {locating ? "⌖ Locating..." : "⌖ Use my location"}
         </button>
+        {locationError && (
+          <p className="text-xs text-[#F2B84B]">{locationError}</p>
+        )}
       </div>
 
       {/* Bill slider */}
