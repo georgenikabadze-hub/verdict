@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { IntakePanel } from "./IntakePanel";
-import { RoofPreview } from "./RoofPreview";
 import { RoofMap3D } from "./RoofMap3D";
+import { RuhrCinematic } from "./RuhrCinematic";
 import { LiveRoofFacts } from "./LiveRoofFacts";
 import { InstallerApprovedToast } from "./InstallerApprovedToast";
 import type { RoofSegment } from "@/lib/contracts";
@@ -65,7 +65,7 @@ export function HomeShell() {
           {coords ? (
             <RoofMap3D coords={coords} address={address} />
           ) : (
-            <RoofPreview coords={coords} address={address} />
+            <RuhrCinematic />
           )}
           
           {/* Live Roof Facts Strip */}
