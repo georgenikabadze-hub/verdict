@@ -70,6 +70,8 @@ data/*.parquet
 # Whitelist small derived/aggregated artifacts only
 !data/processed/*.json
 !dataset_index.json
+# Whitelist Ruhr.glb (cinematic intro asset, ~9MB) — needed at deploy time
+!public/meshes/*.glb
 
 # ---------------------------------------------------------------
 # OS / IDE noise

@@ -70,7 +70,7 @@ export function InstallerApprovedToast() {
         <div className="flex items-center gap-3">
           <span className="text-2xl" aria-hidden="true">{lead.installerLogoEmoji ?? "☀"}</span>
           <div className="flex flex-col">
-            <span className="text-sm font-semibold text-[#F7F8FA]">{lead.installerName ?? "Müller Solartechnik"}</span>
+            <span className="text-sm font-semibold text-[#F7F8FA]">{lead.installerName ?? "Berlin Solar Pro"}</span>
             <span className="text-xs text-[#9BA3AF]">approved your proposal</span>
           </div>
         </div>

@@ -67,7 +67,7 @@ export function InstallerReview() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "approve",
-          installerName: "Müller Solartechnik",
+          installerName: "Berlin Solar Pro",
           installerLogoEmoji: "☀",
           finalBom: v.bomLines,
         }),

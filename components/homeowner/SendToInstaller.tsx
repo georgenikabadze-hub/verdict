@@ -26,7 +26,7 @@ export function SendToInstaller({ leadId }: Props) {
         <div>
           <h3 className="text-lg font-semibold">Verdict sent</h3>
           <p className="text-sm text-[#9BA3AF] mt-1">
-            Müller Solartechnik will review your proposal. We&rsquo;ll notify you within 24 hours.
+            Berlin Solar Pro will review your proposal. We&rsquo;ll notify you within 24 hours.
           </p>
         </div>
         <code className="text-[11px] text-[#5B6470]">lead {leadId}</code>

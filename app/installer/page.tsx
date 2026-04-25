@@ -7,7 +7,7 @@ export default function InstallerPage() {
       {/* Top bar */}
       <header className="flex items-center justify-between border-b border-[#1A1F2A] px-6 py-4 sm:px-10">
         <div className="flex items-baseline gap-3">
-          <span className="text-base font-semibold tracking-tight">Müller Solartechnik</span>
+          <span className="text-base font-semibold tracking-tight">Berlin Solar Pro</span>
           <span className="text-xs text-[#9BA3AF]">· Inbox</span>
         </div>
         <div className="flex items-center gap-2">

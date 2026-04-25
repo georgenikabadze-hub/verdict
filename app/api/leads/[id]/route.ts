@@ -20,7 +20,7 @@ export async function PATCH(req: NextRequest, { params }: Ctx) {
 
   if (body.action === "approve") {
     const updated = approveLead(id, {
-      installerName: body.installerName ?? "Müller Solartechnik",
+      installerName: body.installerName ?? "Berlin Solar Pro",
       installerLogoEmoji: body.installerLogoEmoji ?? "☀",
       finalBom: body.finalBom,
     });
