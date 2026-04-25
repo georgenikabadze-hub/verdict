@@ -1,0 +1,31 @@
+{
+  "name": "buildings/ChIJ_______brandenburg-gate",
+  "center": { "latitude": 52.5163, "longitude": 13.3777 },
+  "imageryDate": { "year": 2022, "month": 7, "day": 14 },
+  "imageryQuality": "HIGH",
+  "postalCode": "10117",
+  "administrativeArea": "Berlin",
+  "regionCode": "DE",
+  "solarPotential": {
+    "maxArrayPanelsCount": 417,
+    "maxArrayAreaMeters2": 818,
+    "maxSunshineHoursPerYear": 1185,
+    "carbonOffsetFactorKgPerMwh": 401,
+    "panelCapacityWatts": 400,
+    "panelHeightMeters": 1.879,
+    "panelWidthMeters": 1.045,
+    "panelLifetimeYears": 20,
+    "roofSegmentStats": [
+      {
+        "pitchDegrees": 7.2,
+        "azimuthDegrees": 178,
+        "stats": { "areaMeters2": 412, "sunshineQuantiles": [400, 800, 1100] }
+      },
+      {
+        "pitchDegrees": 7.4,
+        "azimuthDegrees": 358,
+        "stats": { "areaMeters2": 406, "sunshineQuantiles": [380, 770, 1080] }
+      }
+    ]
+  }
+}

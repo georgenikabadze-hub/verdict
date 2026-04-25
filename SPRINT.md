@@ -1,12 +1,11 @@
 # Verdict — Sprint Execution Plan
 *24h hackathon · Big Berlin Hack 2026 · Reonic track*
-*Synthesized from 2 rounds of Codex + Gemini critical brainstorm. Both AIs picked the same plan on 6 of 7 axes — that's the highest-signal sprint plan we'll get.*
 
 ---
 
 ## Cadence: 6 × 4h sprints (Sat 14:00 → Sun 14:00)
 
-Both AIs picked 4-hour gates over 6-hour blocks. The reason: in a 24h hackathon, a 6-hour silent failure is 25% of the project burned. **Every 4 hours we run a hard GO/NO-GO. Anything not at exit criteria gets cut, not extended.**
+4-hour gates over 6-hour blocks: in a 24h hackathon, a 6-hour silent failure is 25% of the project burned. **Every 4 hours we run a hard GO/NO-GO. Anything not at exit criteria gets cut, not extended.**
 
 | # | Window | Goal | Exit criteria (binary — yes or no) | GO/NO-GO fallback |
 |---|---|---|---|---|
@@ -18,7 +17,7 @@ Both AIs picked 4-hour gates over 6-hour blocks. The reason: in a 24h hackathon,
 | **S6** | Sun 10:00–14:00 | Submit | Final Vercel URL frozen. Loom recorded. Submission packet posted by 14:00 on the dot. Slide deck reviewed. | Any code change after 12:00 must be approved by Integration Lead (no exceptions) |
 
 ### The single highest-leverage hour: **Sat 17:00–18:00 — contract freeze**
-Both AIs flagged this. If `lib/contracts.ts` (Intake, SizingResult, Variant, BoM, ApiStatus) is not locked by 18:00, every workstream invents its own interface and Sunday becomes glue hell. **Whoever is integration captain has veto power on contract changes after 18:00 — full stop.**
+If `lib/contracts.ts` (Intake, SizingResult, Variant, BoM, ApiStatus) is not locked by 18:00, every workstream invents its own interface and Sunday becomes glue hell. **Whoever is integration captain has veto power on contract changes after 18:00 — full stop.**
 
 ---
 
@@ -49,7 +48,7 @@ Both AIs flagged this. If `lib/contracts.ts` (Intake, SizingResult, Variant, BoM
 | Data fetching | **TanStack Query** | Built-in retry + cache + 4s timeout fits the Live/Cached badge pattern. Direct fixture imports for KNN data. |
 | Places autocomplete | **Google Places JS API directly** (no `use-places-autocomplete` wrapper) | One less dependency, full control over the dropdown styling. |
 | Image / heatmap | **Sharp** in a Saturday-night script to bake Solar API GeoTIFFs → PNG overlays | Loaded as Three.js textures at runtime, not live shaders. |
-| LLM access | **Raw `fetch` to Gemini REST** (NOT the Google AI SDK) | Codex + Gemini both picked this. Fewer dep surprises, easier failure handling, 24h-friendly. |
+| LLM access | **Raw `fetch` to Gemini REST** (NOT the Google AI SDK) | Fewer dep surprises, easier failure handling, 24h-friendly. |
 | Deploy | **Vercel** | First deploy by Sat 18:00. Re-deploy on every commit to `main`. |
 | Local dev | **pnpm + Node 22 LTS** | Both AIs explicitly rejected Bun — too risky for a 4-person hackathon team. |
 

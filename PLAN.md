@@ -2,8 +2,7 @@
 *Big Berlin Hack 2026 · Reonic track · Submit Sun 14:00*
 
 > Reonic's installer-DNA quote intelligence layer.
-> Synthesized from 4 rounds of Gemini + Codex critical brainstorm.
-> **Live Google Solar API + Photorealistic 3D Tiles + Places + Geocoding all confirmed working** (probed 2026-04-25). Gemini 2.5 + Gemini-3-pro-image-preview confirmed working. Strategy pivots from cached-only to **live-first with cached safety harbor**.
+> **Live Google Solar API + Photorealistic 3D Tiles + Places + Geocoding all confirmed working** (probed 2026-04-25). Strategy: live-first with cached safety harbor.
 
 ---
 

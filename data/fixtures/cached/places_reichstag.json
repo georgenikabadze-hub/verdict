@@ -1,0 +1,16 @@
+{
+  "predictions": [
+    {
+      "description": "Reichstagsgebäude, Platz der Republik, Berlin, Germany",
+      "placeId": "ChIJiQnyDZRRqEcRyJzOG2QGQNI"
+    },
+    {
+      "description": "Reichstagufer, Berlin, Germany",
+      "placeId": "ChIJExampleReichstaguferBerlinPlaceId"
+    },
+    {
+      "description": "Reichstag U-Bahn / Bundestag, Berlin, Germany",
+      "placeId": "ChIJExampleBundestagStationPlaceId"
+    }
+  ]
+}
