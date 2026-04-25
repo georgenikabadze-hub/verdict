@@ -2,7 +2,8 @@
 *Big Berlin Hack 2026 · Reonic track · Submit Sun 14:00*
 
 > Reonic's installer-DNA quote intelligence layer.
-> Synthesized from 3 rounds of Gemini + Codex critical brainstorm.
+> Synthesized from 4 rounds of Gemini + Codex critical brainstorm.
+> **Live Google Solar API + Photorealistic 3D Tiles + Places + Geocoding all confirmed working** (probed 2026-04-25). Gemini 2.5 + Gemini-3-pro-image-preview confirmed working. Strategy pivots from cached-only to **live-first with cached safety harbor**.
 
 ---
 
@@ -28,9 +29,9 @@
 >
 > "Try that on OpenSolar Ada — they have 28k generic installers' patterns. We have *yours*. Different product."
 
-> **(2:00 — The 3D moat + shading)** *Rotate the German drone mesh. Sun arc animates across the roof — shading heatmap shifts in real time.*
+> **(2:00 — Live measurement + the "any urban address" finale)** *On the same phone, type a different German address (Reichstag, or a judge's address). Camera flies in via Google Photorealistic 3D Tiles. Solar API roof segments highlight in neon — 2 faces, 26.6 m², 7° pitch, 226° azimuth — with annual sunshine numbers on each. Variant cards re-stamp.*
 >
-> "Reonic has cm-precision drone meshes that satellite tools can't match. Verdict measures every face — 42.1 m², 32° pitch, 187° azimuth — runs the annual sun path against neighbouring buildings, and rejects panel positions that lose more than 12% to shading. **Aurora gets you irradiance per panel; Verdict gets you the same plus the installer-DNA reasoning underneath.**"
+> "Verdict starts from a live address, not a survey form. We pull Google's roof geometry and shading model in seconds, then layer Reonic's installer DNA on top. **Same engine. Same 4 fields. Same Reonic-grounded BoM.** Aurora gets you irradiance per panel; Verdict gets you the same plus the installer-DNA reasoning underneath. Cinematic drone meshes are the long-term moat for Reonic's hero customers; live tiles are how it scales to every address in Germany."
 
 > **(2:30 — Send to installer)** *Conrad taps "Send to a certified Reonic installer." A confirmation slides in: "Verdict sent · Müller Solartechnik will review your proposal."*
 
@@ -125,20 +126,23 @@ Installers in DE pay €50–200 for a generic solar lead today (just an address
 - Every lead must include the structured packet above. No raw "address + bill" leads — that's what other platforms do.
 - The installer can edit but never override the hard validation rules (70% feed-in cap, inverter ratio, roof fit). If they try, the recalc rejects with a flag, not a silent fail.
 
-## 4b. Two Sources of Truth — Mesh vs. Solar API
+## 4b. Solar API is the primary source of truth (pivoted 2026-04-25)
 
-Roof measurements and shading both come from two independent sources. We use both, side by side.
+**Pivoted after probing the live APIs.** Solar API works for any urban German building and returns roof segments + annual/monthly flux GeoTIFFs natively. Triangle-normal mesh clustering is now **dropped from the build** — Solar API gives us roof geometry for free, in seconds, with shading included. We save those hours for the installer-edit UX and demo polish.
 
-| Signal | Mesh-derived (Reonic drone) | Solar-API-derived (Google satellite) |
+| Signal | **Primary: Solar API** (live for every demo) | Fallback / cross-check (Ruhr.glb only) |
 |---|---|---|
-| Face area (m²) | Triangle-normal clustering of `.glb` → polygon hull → projected area | `buildingInsights.roofSegmentStats[i].stats.areaMeters2` |
-| Pitch / azimuth | Normal vector → spherical coords | `buildingInsights.roofSegmentStats[i].pitchDegrees / azimuthDegrees` |
-| Annual flux (kWh/m²/yr) | Not directly — needs PVlib offline sim | `dataLayers.annualFluxUrl` GeoTIFF |
-| Monthly flux | Not directly | `dataLayers.monthlyFluxUrl` GeoTIFF (12 bands) |
-| Shading mask | Mesh-domain raycast (expensive) | `dataLayers.maskUrl` + `dsmUrl` (free) |
-| Strength | cm-precision; cannot be matched by satellite | Free, instant, includes neighbor-building shading |
+| Face area (m²) | `buildingInsights.roofSegmentStats[i].stats.areaMeters2` | Mesh-derived, only on Ruhr |
+| Pitch / azimuth | `buildingInsights.roofSegmentStats[i].pitchDegrees / azimuthDegrees` | Mesh normal vector, only on Ruhr |
+| Max panel count | `buildingInsights.solarPotential.maxArrayPanelsCount` | n/a |
+| Annual flux (kWh/m²/yr) | `dataLayers.annualFluxUrl` GeoTIFF | n/a |
+| Monthly flux | `dataLayers.monthlyFluxUrl` GeoTIFF (12 bands) | n/a |
+| Shading mask | `dataLayers.maskUrl` + `dsmUrl` (free) | n/a |
+| Imagery freshness | `imageryDate` (e.g. 2022-07-25) | Drone-mesh date |
 
-**Why both**: the founders love source-agreement (or honest disagreement). Showing "Mesh: 42.1 m² ; Solar API: 41.8 m²" makes the AI feel calibrated, not fabricated.
+**The cm-precision drone mesh** (Ruhr.glb) is now the *cinematic intro hero* — used to open the demo with one polished, drone-quality fly-in — then we live-pivot to "type any urban address" demonstrating the same flow on Photorealistic 3D Tiles + Solar API. Source-agreement on Ruhr.glb (mesh-derived ≈ Solar-API-derived) becomes a 5-second proof point, not a workstream.
+
+**Why we're not building two pipelines anymore**: 3 of 4 .glb addresses are rural and have no Solar API coverage. We had two choices — re-bind the demo to addresses that work for both, or accept Solar API as the universal source. We picked the latter, and we keep Ruhr.glb only as the "look how good the mesh is when we have it" intro flex.
 
 ## 4d-prefix. Sizing formulas + validation rules (deterministic core)
 
@@ -178,18 +182,38 @@ The deterministic placer/sizer uses these formulas. **The LLM only validates and
 | Photogrammetry mesh | **Reonic .glb** (we already have) | free | demo addresses only |
 | Live electricity tariff lookup | **Tavily** | partner tech | one call per session |
 
-## 4d. Coordinates → 3D House Pipeline (homeowner mode)
+## 4d. Coordinates → 3D House Pipeline — LIVE-FIRST (pivoted 2026-04-25)
 
-**The "demo path" uses the 4 Reonic drone meshes we already have.** They are cm-precision photogrammetry of real German buildings — better than anything we could fetch live. For "any other address" we would use Google Photorealistic 3D Tiles + Solar API, but the live demo is locked to the .glb addresses.
+**Live by default. Cached only as safety harbor.** Confirmed working with the new Maps key:
+- Places API (New) → autocomplete returns lat/lon
+- Map Tiles API → Photorealistic 3D Tiles render in Germany via CesiumJS
+- Solar API → `buildingInsights` returns roof segments + `dataLayers` returns annual/monthly flux GeoTIFFs
 
-| Step | Demo address (one of our 4) | Live "any address" path |
+| Step | Live path (default for every address) | Safety harbor (when live fails) |
 |---|---|---|
-| 1 — Coordinates | Pre-resolved lat/lon for the .glb (e.g. Hamburg `53.315578, 9.860276`) | Google Places Autocomplete → lat/lon. "Use my location" is a secondary button — geolocation is a permission-prompt risk in the live demo. |
-| 2 — House render | Load the cached `Hamburg.glb` (DRACOLoader), normalize CESIUM_RTC origin, fly camera in cinematically (low-altitude → 45° oblique). Drop a pulsing pin with the address label. | CesiumJS + Photorealistic 3D Tiles. Camera fly-in 3 sec staged "Finding property → Loading 3D view → Detecting roof faces" loading sequence to hide tile latency. |
-| 3 — Roof faces | Cached `roof_faces.json` from Saturday-night precompute. | Live call to Google Solar API `buildingInsights` → `roofSegmentStats` polygons + pitch + azimuth + area. Overlay polygons on the 3D scene. |
-| 4 — Trust micro-confirm | "Is this your home, 12 Sample Street? · ✓ Yes / ↻ Adjust pin" | Same UI; pin-nudge fallback if Solar API picked the wrong building. |
+| 1 — Coordinates | Google Places Autocomplete → lat/lon | "Use my location" geolocation as secondary; or one of 4 pre-warmed addresses (Reichstag, Berlin Charlottenburg, Hamburg city, Munich) one tap away |
+| 2 — House render | CesiumJS + Photorealistic 3D Tiles, staged "Finding property · Loading 3D view · Detecting roof faces" loader to hide tile latency | If 3D Tiles haven't returned in 4 seconds → static satellite tile + Solar API polygons overlaid (no fly-in animation) |
+| 3 — Roof faces | Live `buildingInsights` → `roofSegmentStats` polygons (pitch, azimuth, area, sunshine quantiles) + `dataLayers` annual flux GeoTIFF for shading heatmap | Cached fixture for the 4 pre-warmed addresses |
+| 4 — Trust micro-confirm | "Is this your home, 12 Sample Street? · ✓ Yes / ↻ Adjust pin" | Same UI; pin-nudge fallback if Solar API picked the wrong building |
+| 5 — Live/Cached badge | Shows **🟢 Live** when Solar API returned in <3s | Shows **🟡 Cached** when fallback kicked in — never silent |
 
-**Fallback ladder if any path breaks live:** (a) 3D Tiles → static satellite image with Solar API polygons overlaid, (b) Solar API down → user draws roof rectangle manually, (c) Geolocation denied → Places autocomplete only.
+### The cinematic intro (only flex left for the .glb)
+The demo OPENS on **Ruhr.glb** — the one cached drone mesh that also has Solar API coverage — for the most polished cinematic fly-in. After 4 seconds of "look how detailed cm-precision drone is", the user types a different address and we live-pivot. Drone mesh = aspirational moat for Reonic's heavy-investment customers; live tiles = how Verdict scales to every German postcode.
+
+### .glb coverage reality (don't pretend)
+- Hamburg.glb (53.315578, 9.860276): rural Niedersachsen, **NO Solar API coverage** (404)
+- Brandenburg.glb (53.307236, 7.545736): rural, **NO Solar API coverage**
+- NorthGermany.glb (53.393029, 9.960488): rural, **NO Solar API coverage**
+- Ruhr.glb (51.145507, 7.109045): **HAS Solar coverage** (200) ← the only one we use
+
+### Pre-warmed safety addresses (Saturday night fixture)
+- Ruhr (matches Ruhr.glb cinematic) — ETRS89/UTM-32N anchor confirmed
+- Reichstag, Berlin (Pariser Platz, 52.516275, 13.377704) — landmark, judges recognize
+- Berlin Charlottenburg (52.49765, 13.255) — residential detached house with 2 roof segments confirmed
+- Hamburg city centre (53.5511, 9.9937) — mid-size urban building, 71 panels max
+- Munich (TBD at hackathon — verify Solar API coverage before locking)
+
+**Fallback ladder:** (a) 3D Tiles slow → static satellite tile with Solar polygons overlaid, (b) Solar API 404 → fall back to Places' returned building footprint + manual roof rectangle, (c) Geolocation denied → Places autocomplete only.
 
 ## 4e. Homeowner site — Lead Intake wireframe
 
@@ -218,14 +242,20 @@ This is what the customer sees, in order. **Screens 1–3 are Phase A (Lead Inta
    "Property found · Loading 3D view · Detecting roof faces"
 ```
 
-**Screen 3 — House confirm + 4-field side panel**
+**Screen 3 — House confirm + Live Roof Facts + 4-field side panel**
 ```
 ┌────────────────────────────────┬────────────────────────────────┐
 │                                │ 12 Sample Street, Hamburg      │
 │                                │ Is this your home?             │
 │   [3D mesh of house            │ [ ✓ Yes ] [ ↻ Adjust pin ]     │
 │    slowly rotating,            │                                │
-│    pulsing pin on roof]        │ Electricity bill / month       │
+│    pulsing pin on roof,        │ ┌── 🟢 Live roof facts ──────┐ │
+│    Solar API roof segments     │ │ 2 roof faces measured      │ │
+│    glowing in neon overlay]    │ │ 26.6 m² · 7° pitch · 226°  │ │
+│                                │ │ Imagery: Jul 2022 · 🟢     │ │
+│                                │ └────────────────────────────┘ │
+│                                │                                │
+│                                │ Electricity bill / month       │
 │                                │ ●━━━━━━━━━━━ €120              │
 │                                │                                │
 │                                │ ⚡ Electric vehicle            │
@@ -239,6 +269,8 @@ This is what the customer sees, in order. **Screens 1–3 are Phase A (Lead Inta
 │                                │   ◯ Become independent         │
 └────────────────────────────────┴────────────────────────────────┘
 ```
+
+The **"Live roof facts"** strip is sourced directly from Solar API `buildingInsights.roofSegmentStats` and `imageryDate`. It converts the cinematic 3D wow into mathematical trust: *"we did not guess, we measured."* The `🟢 Live` badge flips to `🟡 Cached` if we fell back to a fixture — never silent.
 
 ### PHASE B — LEAD QUALIFICATION + HANDOFF
 
@@ -434,7 +466,7 @@ If any profile produces a wildly off result, the formulas/constants are wrong. *
 | **Stage 1 — Homeowner UI** | Cinematic landing, 3D reveal, 4-field intake, variant cards, recommended-card layout, send-to-installer CTA, confirmation screen | **Lovable** for v0; manual override for the 3D and form micro-interactions |
 | **Stage 2 — Installer-in-the-loop UI** | Inbox card, review-and-edit screen with editable BoM rows, Recalculate button (calls deterministic sizer), Approve-and-send action, push-style second-touch on the homeowner phone | (extends Stage 1, no new framework) |
 | **Stage 3 — AI brain depth** | "Why this wins" expandable on each variant card; objection prediction; validator delta badge | **Gemini** structured output |
-| **Roof Geometry & Shading** | Loading the German `.glb` mesh; triangle-normal clustering → faces with **area (m²), dimensions, pitch°, azimuth°, tilt°**; bin-pack panels per face; fitment validator. **Shading: pull Google Solar API `dataLayers` (annual + monthly flux GeoTIFFs + DSM) → per-face annual yield % vs unshaded baseline → animated sun-path heatmap on the 3D mesh.** Outputs measurements + per-face annual flux as hard constraints to the LLM. | three.js + DRACOLoader; Google Solar API `dataLayers` |
+| **Live Solar API integration (replaces mesh clustering)** | Wire `buildingInsights` for roof segments + `dataLayers` for annual/monthly flux GeoTIFFs. Bake heatmap textures from the GeoTIFFs into PNG overlays per face (loaded as Three.js textures, not live shaders). Provide a typed TS client + a Live/Cached badge component. **Triangle-normal mesh clustering is dropped** — Solar API gives us the same outputs natively in <2s per address. | Google Solar API `buildingInsights` + `dataLayers`; CesiumJS for 3D Tiles; Sharp for GeoTIFF→PNG bake |
 | **Pitch & Stage Choreography** | 5-min script, 2-min Loom, slide deck, competitor-contrast framing, backup script for tech failures, repo polish | **Aikido** scan + screenshot for the side prize |
 
 ## 5b. Visual aesthetic + anti-patterns
@@ -465,8 +497,10 @@ If any profile produces a wildly off result, the formulas/constants are wrong. *
 - **German 70% feed-in rule is a hard cap**, not a suggestion. If a variant violates it, the variant is rejected — never shown to the user. The installer cannot override this in Stage 2 either.
 - **Every "Why this wins" rationale cites at least 3 real project IDs from the dataset.** No vague "this works well" filler.
 - **Cache every API response** to SQLite or JSON fixtures the moment it works. Live calls only as a stretch flex.
-- **Pre-test the .glb mesh load + raycast on Sat 14:30** — if the CESIUM_RTC normalization isn't solved by 16:00, switch to the collider-fallback approach. Don't keep grinding.
-- **Golden demo dataset is built before sleep on Sat night.** No Sunday morning gambles.
+- **Pre-test the Solar API + 3D Tiles flow on Sat 14:30** — type 5 random German addresses, confirm `buildingInsights` returns roof segments and 3D Tiles render in <4s. If 3D Tiles latency exceeds 4s on average, lock the demo to the 4 pre-warmed addresses + Ruhr.glb cinematic.
+- **Pre-test Ruhr.glb load on Sat 14:30** (only mesh we still ship). CESIUM_RTC normalization for the cinematic intro must be solved before any UI work.
+- **Golden demo dataset is built before sleep on Sat night.** Pre-fetch + cache: Ruhr + 4 safety addresses (Reichstag, Berlin Charlottenburg, Hamburg city, Munich) — full `buildingInsights` JSON, `dataLayers` URLs followed and saved as PNG heatmaps per roof face, `Places` autocomplete responses. No Sunday morning gambles.
+- **All API responses route through a Live/Cached badge.** Every Solar/Tiles call is wrapped in a 4-second timeout. On timeout or error, fall back to fixture and flip the badge to 🟡 Cached. Never silent. Founders see source-honesty.
 - **All UI is in English.** Reonic is a German company and we keep their German feature names when referencing them, but the Verdict product UI itself is English (homeowner side and installer side).
 - Speed and Brazil framing are dead. Do not say "30 seconds" or "Brazil" in the pitch.
 - Every quote variant shows projected margin + substitution confidence + rationale + **annual yield (kWh/kWp) + roof area (m²)**. No naked price quote.
@@ -500,13 +534,21 @@ If any profile produces a wildly off result, the formulas/constants are wrong. *
 
 ## 8. Demo Addresses
 
-**German drone meshes (3D moat + validator):**
-- Hamburg `53.315578, 9.860276`
-- North Germany `53.393029, 9.960488`
-- Ruhr `51.145507, 7.109045`
-- Brandenburg `53.307236, 7.545736`
+**Cinematic intro (only mesh we still ship):**
+- Ruhr `51.145507, 7.109045` ← `.glb` cm-precision drone mesh + Solar API coverage confirmed (HTTP 200)
 
-**Satellite-path demo (3 backup addresses):** TBD at hackathon, verified via Solar API HIGH/MEDIUM coverage before locking.
+**Pre-warmed safety addresses (live 3D Tiles + Solar API, baked into golden fixtures):**
+- Reichstag, Berlin (Pariser Platz, `52.516275, 13.377704`) — landmark, judges recognize
+- Berlin Charlottenburg residential (`52.49765, 13.255`) — 2 roof segments confirmed (26.6 m², 7° pitch)
+- Hamburg city centre (`53.5511, 9.9937`) — 71 max panels confirmed, 2020-04 imagery
+- Munich TBD — verify Solar API coverage Saturday before locking
+
+**Live "any address" finale**: type at the venue. Falls back to nearest safety address if Solar returns 404 or 3D Tiles latency >4s.
+
+**Dropped addresses (rural, no Solar API coverage — kept only as visual mesh assets):**
+- Hamburg.glb `53.315578, 9.860276` (404)
+- Brandenburg.glb `53.307236, 7.545736` (404)
+- NorthGermany.glb `53.393029, 9.960488` (404)
 
 ---
 
