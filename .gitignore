@@ -1,0 +1,94 @@
+# ---------------------------------------------------------------
+# CREDENTIALS - never commit
+# ---------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.token
+secrets.*
+credentials.*
+service-account*.json
+gcp-*.json
+gcp-key.json
+firebase-*.json
+google-credentials.json
+*.crt
+*.p12
+auth.json
+.netrc
+
+# ---------------------------------------------------------------
+# Local fixtures that may contain API responses with embedded keys
+# (review individually before un-ignoring)
+# ---------------------------------------------------------------
+fixtures/raw/
+fixtures/**/*.local.json
+
+# ---------------------------------------------------------------
+# Node / Next.js
+# ---------------------------------------------------------------
+node_modules/
+.next/
+out/
+dist/
+build/
+.vercel/
+.turbo/
+*.tsbuildinfo
+next-env.d.ts
+
+# ---------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+*.egg-info/
+
+# ---------------------------------------------------------------
+# Datasets - too large + may contain customer-identifiable data
+# (team members fetch from Drive locally; never commit raw)
+# ---------------------------------------------------------------
+data/raw/
+data/*.csv
+data/*.glb
+data/*.gltf
+data/*.zip
+data/*.parquet
+*.glb
+*.csv
+
+# Whitelist small derived/aggregated artifacts only
+!data/processed/*.json
+!dataset_index.json
+
+# ---------------------------------------------------------------
+# OS / IDE noise
+# ---------------------------------------------------------------
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+.idea/
+.vscode/
+!.vscode/extensions.json
+*.swp
+*.swo
+
+# ---------------------------------------------------------------
+# Logs / tmp
+# ---------------------------------------------------------------
+*.log
+logs/
+tmp/
+.cache/
+coverage/
