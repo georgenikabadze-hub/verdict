@@ -32,15 +32,15 @@
 >
 > "Reonic has cm-precision drone meshes that satellite tools can't match. Verdict measures every face — 42.1 square metres, 32° pitch, 187° azimuth — runs the annual sun path against neighbouring buildings, and rejects panel positions that lose more than 12% to shading. **Aurora gets you irradiance per panel; Verdict gets you the same plus the installer-DNA reasoning underneath.**"
 
-> **(3:00 — The distribution flip)** *Switch view to a phone screen. Homeowner mode opens.*
+> **(3:00 — The Lead Intake flip)** *Switch view to a phone screen. Homeowner mode opens.*
 >
-> "Same engine, second surface. The homeowner types their address. Their actual roof appears. They confirm with one tap. Four fields — bill, EV, heating, goal. Every change mutates the 3D scene live. Above the quote cards: *'Based on 41 Reonic projects within 5 km of your house.'* The installer's DNA is now the homeowner's trust signal."
+> "Same engine, second surface — and a second revenue line. This is Lead Intake. The homeowner types their address. Their actual roof appears. They confirm with one tap. Four fields — bill, EV, heating, goal. Every change mutates the 3D scene live. Above the quote cards: *'Based on 41 Reonic projects within 5 km of your house.'*"
 >
-> *Tap "Send to a certified local installer."*
+> *Tap "An zertifizierten Installateur senden."*
 >
-> **(4:00 — The loop)** *Switch back to the installer view. A new lead card stamps in: "Müller Solartechnik received this lead — Verdict-pre-qualified."*
+> **(4:00 — The Verdict-Qualified Lead lands)** *Switch back to the installer view. A new lead card stamps in: "Müller Solartechnik · Verdict-qualified lead from Conrad Smith · 22.100 € · Best Close Rate."*
 >
-> "The same intelligence layer is both: how installers quote, AND how homeowners feed installers. Reonic doesn't lose the installer relationship — Verdict turns it into a pipeline."
+> "Installers pay 50 to 200 euros for a generic solar lead today — just an address and a bill amount. A Verdict lead carries measured roof, demand, intent, and a Reonic-grounded BoM. **Worth 5× a generic lead, because the installer can quote in minutes instead of days.** That's Reonic's second revenue line: intake-as-a-service on top of installer SaaS."
 
 > **(4:30 — Close)** "Verdict isn't the AI for *every* solar quote. It's the AI for *Reonic's* quote — only Reonic's data can train it, only Reonic's installers benefit. **Ship Verdict, and OpenSolar Ada becomes the generic alternative to the Reonic-native intelligence.**"
 
@@ -75,17 +75,20 @@ The hackathon mandates **at least 3** of the official partner technologies. Belo
 
 ---
 
-## 4a. Two User Modes — Installer (hero) and Homeowner (lead intake)
+## 4a. Two User Modes — Installer (hero) and Homeowner (Lead Intake)
 
-Verdict ships in two modes that share the same engine. **The installer is the hero. The homeowner is a lead-pre-qualification surface for installers — never a bypass.**
+Verdict ships in two modes that share the same engine. **The installer is the hero. The homeowner side is a Lead Intake pipeline — every completed homeowner session produces one Verdict-Qualified Lead that lands in an installer's inbox.**
+
+### The commercial framing (use this in the founder pitch)
+Installers in DE pay €50–200 for a generic solar lead today (just an address + maybe a bill amount). A **Verdict-Qualified Lead** carries: measured roof geometry, real demand profile, EV + heating intent, customer goal, *and* a Reonic-grounded recommended BoM with cited similar projects. **A Verdict lead is worth 5× a generic lead because the installer can quote in minutes instead of days.** This is the second revenue line for Reonic: *intake-as-a-service* on top of the existing installer SaaS.
 
 ### Installer mode (the moat — pitched to the founders)
 Installer logs in, opens an existing project, sees: 3 quote variants with margin %, substitution confidence, "why this wins", roof faces with measurements + shading, draft BoM ready to push into Reonic CRM.
 
-### Homeowner mode (the distribution — pitched as installer pipeline)
-**Pattern B: Roof-first, form on the side.** The roof is the canvas. The form is the controls. As the homeowner fills fields, the visualization mutates in real time.
+### Homeowner mode = Lead Intake → Verdict-Qualified Lead
+**Pattern B: Roof-first, form on the side.** The roof is the canvas. The form is the controls. As the homeowner fills fields, the visualization mutates in real time. Conceptually two phases:
 
-**Flow (homeowner):**
+#### Phase A — Lead Intake (what the homeowner is doing)
 1. Lands on the page → sees an example roof rotating with panels.
 2. Address input — Google Places **autocomplete** primary; pin-nudge fallback ("Wrong roof? Move pin").
 3. Building footprint highlights on a satellite basemap with the 3D mesh on top → micro-confirm **"Is this your roof? · Yes / Adjust pin"**.
@@ -96,13 +99,23 @@ Installer logs in, opens an existing project, sees: 3 quote variants with margin
    - Primary goal: *Lower my bill* / *Independence* (toggles whether the engine optimizes for ROI or autarky)
 5. Each field mutates the 3D scene + 3 quote cards in real time. EV toggle materializes a wallbox; bill slider adds/removes panels; goal toggle swaps the recommended battery size.
 6. **Installer Confidence Score badge** above the cards: *"Based on 41 Reonic projects completed within 5 km of your house."* This is the bridge back to the moat.
-7. CTA: **"Send to a certified local installer"** → generates a Verdict Link (unique URL) containing the digital twin (mesh, faces, shading, BoM, demand assumptions, contact). For the demo: clicking it flips the UI to the installer view with a card *"Müller Solartechnik received this lead"*.
 
-### Hard rules for the homeowner mode
-- Never collect more than 4 fields in the first pass. Infer or defer everything else (roof type, household size, income, financing, ownership).
+#### Phase B — Lead Qualification & Handoff
+7. CTA: **"Send to a certified local installer"** → generates a Verdict-Qualified Lead packet containing:
+   - Address + lat/lon + measured roof faces (area, pitch, azimuth)
+   - Demand profile from bill
+   - Intent (EV, heating, goal)
+   - Recommended BoM variant the homeowner picked + the other 2 for context
+   - Cited similar Reonic projects
+   - Verdict Link (unique URL the installer can open to see the same view)
+8. For the demo: clicking sends flips to the installer view with a card *"Müller Solartechnik received Verdict-qualified lead from Conrad Smith — 22.100 € — Best Close Rate variant"*.
+
+### Hard rules for Lead Intake
+- Never collect more than 4 fields in Phase A. Infer or defer everything else.
 - Never offer a deposit, payment, or "buy now" CTA — legally and operationally risky in DE.
 - Never imply the homeowner can bypass the installer. Every CTA routes through one.
 - Mobile-first — homeowners are on phones at the kitchen table.
+- Every lead must include the structured packet above. No raw "address + bill" leads — that's what other platforms do.
 
 ## 4b. Two Sources of Truth — Mesh vs. Solar API
 
@@ -132,9 +145,11 @@ Roof measurements and shading both come from two independent sources. We use bot
 
 **Fallback ladder if any path breaks live:** (a) 3D Tiles → static satellite image with Solar API polygons overlaid, (b) Solar API down → user draws roof rectangle manually, (c) Geolocation denied → Places autocomplete only.
 
-## 4e. Homeowner site — text wireframe
+## 4e. Homeowner site — Lead Intake wireframe
 
-This is what the customer sees, in order. German labels match Reonic's tone.
+This is what the customer sees, in order. German labels match Reonic's tone. **Screens 1–3 are Phase A (Lead Intake). Screens 4–7 are Phase B (Lead Qualification + Handoff).**
+
+### PHASE A — LEAD INTAKE
 
 **Screen 1 — Landing (full bleed)**
 ```
@@ -178,6 +193,8 @@ This is what the customer sees, in order. German labels match Reonic's tone.
 │                                │   ◯ Unabhängig werden          │
 └────────────────────────────────┴────────────────────────────────┘
 ```
+
+### PHASE B — LEAD QUALIFICATION + HANDOFF
 
 **Screen 4 — Three variants stamp in (panels animate onto the roof)**
 ```
