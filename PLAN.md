@@ -132,6 +132,44 @@ Roof measurements and shading both come from two independent sources. We use bot
 
 **Why both**: the founders love source-agreement (or honest disagreement). Showing "Mesh: 42.1 m² ; Solar API: 41.8 m²" makes the AI feel calibrated, not fabricated.
 
+## 4d-prefix. Sizing formulas + validation rules (deterministic core)
+
+The deterministic placer/sizer uses these formulas. **The LLM only validates and explains — never overrides math.**
+
+### Sizing formulas
+- **Panel count** = Annual kWh ÷ (PSH × 365 × panel_Wp × 0.001 × system_efficiency)
+- **Battery kWh** = Daily kWh × self_consumption_target × (1 − solar_daytime_fraction)
+- **Heat pump kW** = (Building_area × heat_loss_W_per_m²) ÷ 1000 × safety_factor
+
+### Constants (German residential defaults)
+- `self_consumption_target = 0.80`
+- `system_efficiency = 0.85`
+- `DoD safety_factor = 1.2`
+- `heat_pump safety_factor = 1.1`
+
+### Hard validation rules (run AFTER sizing, BEFORE showing the variant)
+- **Inverter ratio**: panel_kWp × 0.75 ≤ inverter_kW ≤ panel_kWp × 1.10
+- **Battery sanity**: 0.5 ≤ battery_kWh / daily_kWh ≤ 2.0
+- **Roof area fit**: total_panel_area_m² ≤ usable_roof_area_m²
+- **German 70% feed-in rule**: if no battery & no controlled curtailment, inverter output capped at 0.70 × panel_kWp (regulatory hard limit; reduce panel count or add storage if violated)
+- **Auto-adjust logic on failure**: reduce panel count first, then adjust battery, then flag for installer
+
+### Edge cases that need explicit handling
+- North-facing roof → reduce expected yield by ~30% before sizing
+- Very low consumption (< 2,000 kWh/yr) → no battery, smaller panel set, no HP
+- Apartment / shared roof → flag as out-of-scope ("Eigentümergemeinschaft erforderlich")
+- Existing PV system → only size additional capacity
+
+### Free data sources for the inputs
+| Need | API | Cost | Note |
+|---|---|---|---|
+| Annual yield per kWp + monthly distribution | **PVGIS** (EU Commission) | Free, no key | `re.jrc.ec.europa.eu/api/v5_2/PVcalc` |
+| Heating Degree Days (HDD) for HP sizing | **Open-Meteo** | Free, no key | `archive-api.open-meteo.com` |
+| HDD/CDD raster maps by region | **Copernicus CDS** | Free, requires register | optional |
+| Roof segments + pitch + azimuth + area | **Google Solar API** `buildingInsights` | paid (cache!) | our primary roof source |
+| Photogrammetry mesh | **Reonic .glb** (we already have) | free | demo addresses only |
+| Live electricity tariff lookup | **Tavily** | partner tech | one call per session |
+
 ## 4d. Coordinates → 3D House Pipeline (homeowner mode)
 
 **The "demo path" uses the 4 Reonic drone meshes we already have.** They are cm-precision photogrammetry of real German buildings — better than anything we could fetch live. For "any other address" we would use Google Photorealistic 3D Tiles + Solar API, but the live demo is locked to the .glb addresses.
@@ -249,7 +287,7 @@ Concrete sub-deliverables:
 2. **Cinematic house reveal** (2.8 sec) — staged "Grundstück gefunden · Lade 3D-Ansicht · Erkenne Dachflächen" loader; cross-fade from satellite top-down → cached `.glb` mesh oblique view; pulsing pin + address label; "Wir haben Ihr Dach gefunden."
 3. **House interaction = guided, not free** — drag-rotate slightly, pinch-zoom, three preset views ("Dach / Straße / Module"). NO free CAD camera.
 4. **4-field intake (stepper)** — bill slider (€), EV toggle, heating type icons, primary goal (Stromkosten / Unabhängigkeit). Each field updates 3D scene live.
-5. **The Verdict reveal** — single dominant recommended card ("Empfohlen für Ihr Haus: **Best Close Rate ★**"); two alternatives collapsed below ("Best Margin", "Best Lifetime Value"); one big number ROI ("Sie sparen ca. **€142/Monat**"); horizontal payback timeline (Year 0 invest → Year 8 break-even → €38,400 over 25y).
+5. **The Verdict reveal** — single dominant recommended card ("Empfohlen für Ihr Haus: **Best Close Rate ★**"); two alternatives collapsed below ("Best Margin", "Best Lifetime Value"); one big number ROI ("Sie sparen ca. **€142/Monat**"); horizontal payback timeline (Year 0 invest → Year 8 break-even → €38,400 over 25y). **Each component shows a traffic-light confidence dot (🟢 green = high-confidence match / 🟡 yellow = acceptable / 🔴 red = installer review needed)** — visceral, no-jargon trust signal.
 6. **Surprise & delight** — animated panel snap with per-face count labels; bill transformation (€220 → €78); CO2 → trees ("34 Bäume im Schwarzwald"); spouse-share card ("Unser Haus könnte €38.400 in 25 Jahren sparen").
 7. **Trust block** — citations: 2-3 similar Reonic projects ("Ähnlich wie Projekte #882, #1041 in Hamburg"); explicit "No credit check, no income, no obligation" line; brand transparency (Huawei + EcoFlow logos visible).
 8. **Handoff CTA** — primary button "Verdict an Installateur senden" + microcopy "unverbindlich · kein Anruf · Installateur erhält Ihre Verdict-Mappe (Dachvermessung, Bedarf, empfohlene Anlage) und kann sofort kalkulieren."
@@ -264,7 +302,9 @@ Concrete sub-deliverables:
 **7-hour Stage 1 cut list** (in order of expendability): spouse-share card → CO2 trees → bill transformation → preset views. Floor: mesh loads, address triggers reveal, 4 fields update one variant card, send button shows confirmation.
 
 ### Stage 2 — Installer view (stretch)
-A single screen showing the lead lands in the installer's inbox: customer card mimicking Conrad Smith / 4,450€ / Freddy format, with the recommended variant + measured roof + cited projects. Links back to the homeowner-side Verdict view via the unique URL.
+A single screen showing the lead lands in the installer's inbox: customer card mimicking Conrad Smith / 4,450€ / Freddy format, with the recommended variant + measured roof + cited projects + traffic-light confidence per component. Links back to the homeowner-side Verdict view via the unique URL.
+
+**Editable**: installer can change panel count / battery model / HP model and hit a **"Neu berechnen" (Recalculate)** button — re-runs the sizing engine, re-validates, re-shows variants. Confidence dots update live.
 
 Time budget: 3-4h max. If Stage 1 polish needs more time, drop Stage 2 to a static screenshot in the slide deck.
 
@@ -290,6 +330,19 @@ Live AI **enhances** the demo, never **gates** it. Tonight, precompute and freez
 - Google Places + Solar API responses for the chosen address — cached locally
 
 If every API and LLM call dies on stage, the demo still runs from the golden dataset. **This is non-negotiable.**
+
+### Golden test profiles (use as fixtures + end-to-end smoke tests)
+These are the canonical homeowners we test the engine against. Each must produce the listed expected output ±10% on panel count.
+
+| Profile | Location | Annual kWh | Roof | Heating | Expected output |
+|---|---|---|---|---|---|
+| **Family of 4** | Berlin Mitte | 5,200 | South 35°, 60 m² | Gas | 14 panels (5.6 kWp) + 10 kWh battery + 8 kW HP |
+| **Couple, EV owner** | Munich Schwabing | 8,500 | South-West 30°, 80 m² | Oil | 22 panels (8.8 kWp) + 15 kWh battery + 10 kW HP |
+| **Single person** | Hamburg Altona | 2,100 | E-W split, 40 m² | District heating | 8 panels (3.2 kWp) + 5 kWh battery, **no HP** |
+| **Family** | Frankfurt Sachsenhausen | 12,000 | South 40°, 100 m² | Gas | 28 panels (11.2 kWp) + battery + 12 kW HP |
+| **Large family + pool** | (anywhere) | high | South 40°, 100 m² | (gas) | + 12 kW HP, large battery |
+
+If any profile produces a wildly off result, the formulas/constants are wrong. **All 5 must pass before Stage 2 starts.**
 
 ## 5. Workstream Split (no people, just buckets)
 
@@ -327,6 +380,8 @@ If every API and LLM call dies on stage, the demo still runs from the golden dat
 - **Honor what Reonic owns**: never duplicate `automatische Dachbelegung`, `automatische Verstringung`, `Wechselrichterauslegung`, or `KfW-Förderservice`. Demo says: "We start *after* Reonic's automation. Verdict picks the commercial package."
 - **KfW eligibility as a flag, not a calculator.** Show "Variant 2: KfW-relevant — likely eligible for Reonic's funding workflow." Never quote a specific rate live (legally risky if wrong).
 - **Each variant rationale also flags one objection-prediction**: "Risk: homeowner may reject battery price; counter with project #X."
+- **All 5 golden test profiles must pass ±10% on panel count before Stage 2 work begins.** If formulas drift, fix them before adding features.
+- **German 70% feed-in rule is a hard cap**, not a suggestion. If a variant violates it, the variant is rejected — never shown to the user.
 - **Every "Why this wins" rationale cites at least 3 real project IDs from the dataset.** No vague "this works well" filler.
 - **Cache every API response** to SQLite or JSON fixtures the moment it works. Live calls only as a stretch flex.
 - **Pre-test the .glb mesh load + raycast on Sat 14:30** — if the CESIUM_RTC normalization isn't solved by 16:00, switch to the collider-fallback approach. Don't keep grinding.
