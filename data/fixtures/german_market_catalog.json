@@ -1,0 +1,228 @@
+{
+  "scrapedAt": "2026-04-26T07:12:57.857Z",
+  "source": "tavily+gemini+fallback",
+  "panels": [
+    {
+      "brand": "Trina",
+      "model": "Vertex S+ Residential NEG9R.28",
+      "wp": 445,
+      "eurEx": 150,
+      "currency": "EUR",
+      "sourceUrl": "https://www.sunevosolar.com/trina-vertex-s-residential-neg9r-28-solar-panel-440w-445w-450w-eu-europe-warehouse_p149.html",
+      "sourceTitle": "Trina Vertex S+ Residential NEG9R.28 Solar Panel 440W ..."
+    },
+    {
+      "brand": "Huawei",
+      "model": "LUNA-440",
+      "wp": 440,
+      "eurEx": 155,
+      "currency": "EUR",
+      "sourceUrl": "https://solar.huawei.com/",
+      "sourceTitle": "Huawei Solar EU"
+    },
+    {
+      "brand": "Meyer Burger",
+      "model": "Black 400",
+      "wp": 400,
+      "eurEx": 230,
+      "currency": "EUR",
+      "sourceUrl": "https://www.meyerburger.com/",
+      "sourceTitle": "Meyer Burger"
+    },
+    {
+      "brand": "Longi",
+      "model": "Hi-MO 6 Explorer 440",
+      "wp": 440,
+      "eurEx": 145,
+      "currency": "EUR",
+      "sourceUrl": "https://www.longi.com/",
+      "sourceTitle": "Longi Solar"
+    },
+    {
+      "brand": "Trina Solar",
+      "model": "Vertex S+ 440",
+      "wp": 440,
+      "eurEx": 150,
+      "currency": "EUR",
+      "sourceUrl": "https://www.trinasolar.com/",
+      "sourceTitle": "Trina Solar"
+    }
+  ],
+  "inverters": [
+    {
+      "brand": "Huawei",
+      "model": "SUN2000-10KTL-M1",
+      "kw": 10,
+      "eurEx": 1800,
+      "sourceUrl": "https://ahguangya.en.made-in-china.com/product/wxSRZrBCftVg/China-Hybrid-Solar-Inverter-Huawei-Inverter-5kw-6kw-10kw-12kw-50kw-Original-Huawei-Hybrid-Inverter-in-Stock.html",
+      "sourceTitle": "Hybrid Solar Inverter Huawei Inverter 5kw 6kw 10kw 12kw ...",
+      "currency": "EUR"
+    },
+    {
+      "brand": "SMA",
+      "model": "Sunny Tripower 8.0",
+      "kw": 8,
+      "eurEx": 1400,
+      "sourceUrl": "https://www.solaricashop.com/solar-inverters.html",
+      "sourceTitle": "Solar inverter online | SMA Fronius KACO ABB SolarEdge | SolaricaShop.com",
+      "currency": "EUR"
+    },
+    {
+      "brand": "SMA",
+      "model": "Sunny Tripower 10.0",
+      "kw": 10,
+      "eurEx": 1600,
+      "sourceUrl": "https://www.solaricashop.com/solar-inverters.html",
+      "sourceTitle": "Solar inverter online | SMA Fronius KACO ABB SolarEdge | SolaricaShop.com",
+      "currency": "EUR"
+    },
+    {
+      "brand": "SMA",
+      "model": "Sunny Boy 6.0-1AV-41",
+      "kw": 6,
+      "eurEx": 1200,
+      "sourceUrl": "https://www.solaricashop.com/solar-inverters.html",
+      "sourceTitle": "Solar inverter online | SMA Fronius KACO ABB SolarEdge | SolaricaShop.com",
+      "currency": "EUR"
+    }
+  ],
+  "batteries": [
+    {
+      "brand": "Tesla",
+      "model": "Powerwall 3",
+      "kwh": 13.5,
+      "eurEx": 9000,
+      "currency": "EUR",
+      "sourceUrl": "https://community.powmr.com/knowledge/solar-batteries-for-home-unbiased-comparison-of-the-top-models-in-2026/",
+      "sourceTitle": "Solar Batteries for Home: Unbiased Comparison of the Top Models in 2026"
+    },
+    {
+      "brand": "BYD",
+      "model": "Premium LVL",
+      "kwh": 15.5,
+      "eurEx": 6800,
+      "currency": "EUR",
+      "sourceUrl": "https://www.youtube.com/watch?v=7PDwW7LX2IQ",
+      "sourceTitle": "BYD Battery Box vs. Tesla Powerwall – New Home Battery Battle!"
+    },
+    {
+      "brand": "LG Energy Solution",
+      "model": "LG Prime+",
+      "kwh": 16,
+      "eurEx": 7800,
+      "currency": "EUR",
+      "sourceUrl": "https://en.cntepower.com/7-latest-solar-batteries-of-2026-new-models-what-they-offer/",
+      "sourceTitle": "7 Latest Solar Batteries of 2026: New Models & What They Offer - cntepower"
+    }
+  ],
+  "wallboxes": [
+    {
+      "brand": "Keba",
+      "model": "Wallbox 11kW-3phase",
+      "kw": 11,
+      "eurEx": 958,
+      "sourceUrl": "https://www.galaxus.be/en/s4/producttype/toplist/brand/ev-chargers-3328/keba-45460",
+      "sourceTitle": "The best Keba EV chargers for 2026 on Galaxus",
+      "currency": "EUR"
+    },
+    {
+      "brand": "go-e",
+      "model": "Charger Gemini 22 kW",
+      "kw": 11,
+      "eurEx": 850,
+      "currency": "EUR",
+      "sourceUrl": "https://go-e.com/de-de/",
+      "sourceTitle": "go-e Charger"
+    },
+    {
+      "brand": "KEBA",
+      "model": "KeContact P30 x-series",
+      "kw": 11,
+      "eurEx": 1100,
+      "currency": "EUR",
+      "sourceUrl": "https://www.keba.com/de/emobility/",
+      "sourceTitle": "KEBA KeContact"
+    },
+    {
+      "brand": "Wallbox",
+      "model": "Pulsar Plus",
+      "kw": 11,
+      "eurEx": 750,
+      "currency": "EUR",
+      "sourceUrl": "https://wallbox.com/de_de/",
+      "sourceTitle": "Wallbox Pulsar"
+    },
+    {
+      "brand": "ABL",
+      "model": "eMH3",
+      "kw": 11,
+      "eurEx": 1200,
+      "currency": "EUR",
+      "sourceUrl": "https://www.abl.de/",
+      "sourceTitle": "ABL eMH3"
+    }
+  ],
+  "heatPumps": [
+    {
+      "brand": "Vaillant",
+      "model": "Arotherm Pro",
+      "kw": 5,
+      "eurEx": 9000,
+      "currency": "EUR",
+      "sourceUrl": "https://www.pv-magazine.com/2026/04/15/vaillant-launches-space-saving-residential-heat-pump/",
+      "sourceTitle": "Vaillant launches space-saving residential heat pump – pv magazine International"
+    },
+    {
+      "brand": "Vaillant",
+      "model": "Arotherm Pro",
+      "kw": 7,
+      "eurEx": 10500,
+      "currency": "EUR",
+      "sourceUrl": "https://www.pv-magazine.com/2026/04/15/vaillant-launches-space-saving-residential-heat-pump/",
+      "sourceTitle": "Vaillant launches space-saving residential heat pump – pv magazine International"
+    },
+    {
+      "brand": "Vaillant",
+      "model": "Arotherm Pro",
+      "kw": 11,
+      "eurEx": 13000,
+      "currency": "EUR",
+      "sourceUrl": "https://www.pv-magazine.com/2026/04/15/vaillant-launches-space-saving-residential-heat-pump/",
+      "sourceTitle": "Vaillant launches space-saving residential heat pump – pv magazine International"
+    }
+  ],
+  "mounts": [
+    {
+      "brand": "IBC Solar",
+      "model": "Aerofix",
+      "eurEx": 75,
+      "sourceUrl": "https://www.pveurope.eu/products/mounting",
+      "sourceTitle": "mounting",
+      "currency": "EUR"
+    },
+    {
+      "brand": "K2 Systems",
+      "model": "CrossRail tiled roof",
+      "eurEx": 65,
+      "currency": "EUR",
+      "sourceUrl": "https://k2-systems.com/de/",
+      "sourceTitle": "K2 Systems CrossRail"
+    },
+    {
+      "brand": "Schletter",
+      "model": "Rapid 2+ tiled roof",
+      "eurEx": 70,
+      "currency": "EUR",
+      "sourceUrl": "https://www.schletter-group.com/de/",
+      "sourceTitle": "Schletter Rapid 2+"
+    },
+    {
+      "brand": "IBC SOLAR",
+      "model": "TopFix 200 tiled roof",
+      "eurEx": 60,
+      "currency": "EUR",
+      "sourceUrl": "https://www.ibc-solar.de/",
+      "sourceTitle": "IBC TopFix 200"
+    }
+  ]
+}

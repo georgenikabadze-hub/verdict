@@ -46,9 +46,50 @@ Installer side
 
 | Tech | Where it is used | File path |
 |---|---|---|
-| Google Gemini | Runtime rationale generation for each quote variant. Gemini image generation is not wired in the committed app. | `lib/api/gemini.ts`, `lib/sizing/rationale.ts` |
-| Tavily | Runtime residential electricity tariff lookup for quote ROI, with 4s timeout and deterministic default. | `lib/api/tavily.ts`, `app/api/quote/route.ts`, `app/quote/page.tsx` |
-| Google Maps Platform + CesiumJS | Runtime geocoding, Solar API roof segments, and photoreal 3D roof context. | `app/api/quote/route.ts`, `app/api/roof-facts/route.ts`, `components/homeowner/CesiumRoofView.tsx` |
+| Google Gemini | (a) Runtime rationale generation for each quote variant. (b) Build-time structured extraction of German solar market product listings from Tavily snippets, used to populate the cached catalog. | `lib/api/gemini.ts`, `lib/sizing/rationale.ts`, `scripts/scrape-catalog.ts` |
+| Tavily | (a) Runtime residential electricity tariff lookup for quote ROI, with 4s timeout and deterministic default. (b) Build-time German solar market scraping across 6 categories (panels, inverters, batteries, wallboxes, heat pumps, mounts) — see "Tavily-powered market catalog" below. | `lib/api/tavily.ts`, `app/api/quote/route.ts`, `scripts/scrape-catalog.ts`, `data/fixtures/german_market_catalog.json` |
+| Google Maps Platform + CesiumJS | Runtime geocoding, Solar API roof segments, photoreal 3D roof context, and per-panel `solarPanels[]` placement consumed by the installer-side BoM composer. | `app/api/quote/route.ts`, `app/api/roof-facts/route.ts`, `components/homeowner/CesiumRoofView.tsx` |
+| Lovable | Initial UI scaffold for the installer variant cards (`VariantCardLovable`). Generated via Lovable, then wired into the React tree by hand. | `components/installer/VariantCardLovable.tsx` (header comment marks Lovable provenance) |
+
+## Tavily-powered market catalog
+
+The installer-side bill-of-materials composer is grounded in a **cached catalog of real German solar market data**, scraped via Tavily and structured by Gemini at build time. The runtime never calls Tavily — it reads the cached fixture — so the demo is bulletproof against API outages.
+
+**Pipeline:**
+
+```
+scripts/scrape-catalog.ts
+  ├─ Tavily fan-out (6 parallel queries)
+  │    panels / inverters / batteries / wallboxes / heat pumps / mounts
+  │
+  ├─ Gemini 2.5 Flash structured extraction (one call per category)
+  │    snippet → { brand, model, kw|kwh|wp, eurEx, sourceUrl, sourceTitle }
+  │
+  └─ data/fixtures/german_market_catalog.json
+         { scrapedAt, source, panels[], inverters[], ... }
+```
+
+**To re-scrape the catalog with current market data:**
+
+```bash
+pnpm scrape:catalog
+```
+
+(Requires `TAVILY_API_KEY` and `GEMINI_API_KEY` in `.env.local`.)
+
+**What's in the cached catalog:**
+- `scrapedAt` — ISO timestamp of the last scrape
+- `source` — `"tavily+gemini"` (all categories real), `"tavily+gemini+fallback"` (some Gemini extractions empty, merged with hand-written canonicals), or `"fallback"` (no scrape data)
+- One array per category, each item carrying `sourceUrl` + `sourceTitle` so the installer UI can show "this price came from {pv-magazine.com}" attribution chips per BoM line.
+
+**How the runtime uses it:**
+
+1. Installer opens a lead → `lib/sizing/compose-from-market.ts` reads the cached catalog
+2. ROI-optimal sizer (`lib/sizing/roi-optimizer.ts`) picks the panel count that maximizes 25-year NPV given Berlin's €0.32 retail / €0.08 feed-in spread on the specific roof
+3. Picks compatible inverter + battery + wallbox + heat pump from the catalog
+4. Each BoM line in the installer UI shows a `SourceUrlChip` linking back to the page Tavily found it on
+
+The "Tavily" partner-tech requirement is satisfied **twice over**: once as a runtime API (live electricity tariff lookup in `lib/api/tavily.ts`) and once as a build-time market-research pipeline driving the entire installer-side offer composition.
 
 ## Privacy Story
 

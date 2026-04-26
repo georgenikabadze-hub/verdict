@@ -12,7 +12,8 @@
     "test:e2e": "playwright test",
     "postinstall": "node scripts/copy-cesium.mjs",
     "prebake": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/csv_to_json.ts",
-    "prebake:heatmaps": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/bake-heatmaps.ts"
+    "prebake:heatmaps": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/bake-heatmaps.ts",
+    "scrape:catalog": "pnpm dlx tsx scripts/scrape-catalog.ts"
   },
   "dependencies": {
     "@googlemaps/js-api-loader": "^2.0.2",
