@@ -211,6 +211,15 @@ export function InstallerLeadDetail({ lead, onLeadChange }: Props) {
   const [solarPanels, setSolarPanels] = useState<SolarPanelEntry[]>([]);
   const [manuallyAddedPanels, setManuallyAddedPanels] = useState<SolarPanelEntry[]>([]);
   const [removedPanelKeys, setRemovedPanelKeys] = useState<Set<string>>(new Set());
+  // segmentIndex set the installer toggled OFF in the SegmentBreakdown
+  // sidebar. AI panels with these segmentIndex values are filtered out of
+  // the Cesium overlay AND counted out of the BoM scale, so the installer
+  // can deliberately exclude e.g. north-facing wings to concentrate capex
+  // on the high-yield south face. Manual panels (segmentIndex = -1) are
+  // never affected because they sit outside the per-segment yield model.
+  const [disabledSegmentIndexes, setDisabledSegmentIndexes] = useState<Set<number>>(
+    new Set(),
+  );
   const [showPanels, setShowPanels] = useState(true);
   const [editMode, setEditMode] = useState(false);
 
@@ -232,6 +241,7 @@ export function InstallerLeadDetail({ lead, onLeadChange }: Props) {
     setSolarPanels([]);
     setManuallyAddedPanels([]);
     setRemovedPanelKeys(new Set());
+    setDisabledSegmentIndexes(new Set());
     setEditMode(false);
 
     const { lat, lng } = lead.privateDetails;
@@ -338,10 +348,25 @@ export function InstallerLeadDetail({ lead, onLeadChange }: Props) {
     setManuallyAddedPanels((prev) => [...prev, panel]);
   }, []);
 
-  // Reset all manual edits — clear additions + un-remove everything.
+  // Reset all manual edits — clear additions + un-remove everything +
+  // re-enable any segments the installer toggled off.
   const resetPanelEdits = useCallback(() => {
     setManuallyAddedPanels([]);
     setRemovedPanelKeys(new Set());
+    setDisabledSegmentIndexes(new Set());
+  }, []);
+
+  // Toggle a roof segment on/off in the SegmentBreakdown sidebar. AI panels
+  // belonging to disabled segments are pulled from the Cesium overlay and
+  // also counted out of the BoM scale, so the installer can exclude e.g.
+  // north-facing wings without ad-hoc per-panel removal.
+  const toggleSegment = useCallback((segmentIndex: number) => {
+    setDisabledSegmentIndexes((prev) => {
+      const next = new Set(prev);
+      if (next.has(segmentIndex)) next.delete(segmentIndex);
+      else next.add(segmentIndex);
+      return next;
+    });
   }, []);
 
   // Pro-rata recompute. Once the installer kills a few panels (or adds some
@@ -350,12 +375,31 @@ export function InstallerLeadDetail({ lead, onLeadChange }: Props) {
   // this BEFORE the variant cards render so the live numbers match what the
   // overlay shows. systemKwp also tracks active count.
   const sizerPanelCount = liveSizing?.panelCount ?? lead.publicPreview.sizing.panelCount;
-  // AI panels: how many of Google's top-N are still active (not toggled off).
-  // Manual panels: the installer's additions, minus any they then removed.
-  // Each manual panel gets a stable key so removals are idempotent.
+
+  // Top-N AI panels by yield, then count how many fall in segments the
+  // installer disabled in the SegmentBreakdown. We need this against the
+  // SAME slice the overlay uses (otherwise the BoM scale and the rendered
+  // panels disagree).
+  const aiTopSlice = useMemo<SolarPanelEntry[]>(() => {
+    const sortedAi = [...solarPanels].sort(
+      (a, b) => (b.yearlyEnergyDcKwh ?? 0) - (a.yearlyEnergyDcKwh ?? 0),
+    );
+    return sortedAi.slice(0, sizerPanelCount);
+  }, [solarPanels, sizerPanelCount]);
+  const aiDisabledBySegmentCount = useMemo(
+    () =>
+      aiTopSlice.filter((p) => disabledSegmentIndexes.has(p.segmentIndex)).length,
+    [aiTopSlice, disabledSegmentIndexes],
+  );
+
+  // AI panels: how many of Google's top-N are still active. A panel is
+  // inactive if either (a) the installer toggled it off via panel-click, or
+  // (b) its roof segment was toggled off in the SegmentBreakdown sidebar.
   const aiActiveCount = Math.max(
     0,
-    sizerPanelCount - Array.from(removedPanelKeys).filter((k) => !k.startsWith("manual-")).length,
+    sizerPanelCount -
+      Array.from(removedPanelKeys).filter((k) => !k.startsWith("manual-")).length -
+      aiDisabledBySegmentCount,
   );
   const manualActiveCount = manuallyAddedPanels.filter(
     (_p, idx) => !removedPanelKeys.has(`manual-${idx}`),
@@ -480,12 +524,14 @@ export function InstallerLeadDetail({ lead, onLeadChange }: Props) {
   // panelKey() based on lat/lng. Manual panels get a `manual-${idx}` key so
   // toggling them doesn't collide with the AI key namespace.
   const combinedOverlayPanels = useMemo<SolarPanelEntry[]>(() => {
-    const sortedAi = [...solarPanels].sort(
-      (a, b) => (b.yearlyEnergyDcKwh ?? 0) - (a.yearlyEnergyDcKwh ?? 0),
+    // Drop AI panels whose segmentIndex was toggled off in the sidebar.
+    // Manual panels (segmentIndex = -1) always pass through — they live
+    // outside the per-segment yield model.
+    const aiEnabled = aiTopSlice.filter(
+      (p) => !disabledSegmentIndexes.has(p.segmentIndex),
     );
-    const aiSlice = sortedAi.slice(0, sizerPanelCount);
-    return [...aiSlice, ...manuallyAddedPanels];
-  }, [solarPanels, manuallyAddedPanels, sizerPanelCount]);
+    return [...aiEnabled, ...manuallyAddedPanels];
+  }, [aiTopSlice, manuallyAddedPanels, disabledSegmentIndexes]);
 
   // Default azimuth + pitch for new manual panels — use the dominant
   // segment's values so click-to-add panels tilt with the same slope as
@@ -824,6 +870,8 @@ export function InstallerLeadDetail({ lead, onLeadChange }: Props) {
               totalPanels={liveSizing.panelCount}
               totalSystemKwp={liveSizing.systemKwp}
               mpptStringCount={liveSizing.mpptStringCount ?? 1}
+              disabledSegmentIndexes={disabledSegmentIndexes}
+              onToggleSegment={toggleSegment}
             />
           )}
         </aside>

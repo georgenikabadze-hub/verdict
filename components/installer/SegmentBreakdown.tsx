@@ -18,6 +18,12 @@ interface Props {
   totalPanels: number;
   totalSystemKwp: number;
   mpptStringCount: number;
+  /** segmentIndex set the installer toggled OFF. Their panels are removed from
+   *  the overlay + counted out of the BoM scale. Used + skipped rows can both
+   *  be toggled, so the installer can deliberately exclude e.g. north-facing
+   *  segments to concentrate capex on the high-yield faces. */
+  disabledSegmentIndexes?: Set<number>;
+  onToggleSegment?: (segmentIndex: number) => void;
 }
 
 const STRING_COLORS = ["#3DAEFF", "#62E6A7", "#F2B84B", "#F36262"] as const;
@@ -37,8 +43,16 @@ function formatPitch(pitch: number): string {
   return `${Math.round(pitch)}°`;
 }
 
-export function SegmentBreakdown({ rows, totalPanels, totalSystemKwp, mpptStringCount }: Props) {
+export function SegmentBreakdown({
+  rows,
+  totalPanels,
+  totalSystemKwp,
+  mpptStringCount,
+  disabledSegmentIndexes,
+  onToggleSegment,
+}: Props) {
   const allSkipped = rows.length === 0 || rows.every((row) => row.status === "skipped");
+  const canToggle = typeof onToggleSegment === "function";
 
   return (
     <section className="rounded-lg border border-[#2A3038] bg-[#12161C] p-4">
@@ -66,15 +80,33 @@ export function SegmentBreakdown({ rows, totalPanels, totalSystemKwp, mpptString
                 <th scope="col" className="px-3 py-2 font-medium">Area</th>
                 <th scope="col" className="px-3 py-2 font-medium">Panels</th>
                 <th scope="col" className="px-3 py-2 font-medium">String</th>
-                <th scope="col" className="px-3 py-2 font-medium">Yield/yr</th>
+                <th scope="col" className="px-3 py-2 font-medium">kWh/panel/yr</th>
+                {canToggle ? (
+                  <th scope="col" className="px-3 py-2 font-medium text-right">On/Off</th>
+                ) : null}
               </tr>
             </thead>
             <tbody>
               {rows.map((row) => {
                 const skipped = row.status === "skipped";
                 const color = stringColor(row.stringId);
+                const off = disabledSegmentIndexes?.has(row.index) === true;
+                // Per-panel annual yield is the most actionable signal for an
+                // installer choosing which faces to include — it makes the
+                // gap between a south face (~410) and a north face (~225)
+                // immediately legible.
+                const yieldPerPanelKwh =
+                  !skipped && row.panelsAllocated > 0
+                    ? row.yieldKwhPerYear / row.panelsAllocated
+                    : 0;
+                const rowDimmed = off || skipped;
                 return (
-                  <tr key={row.index} className="border-b border-[#2A3038] last:border-b-0">
+                  <tr
+                    key={row.index}
+                    className={`border-b border-[#2A3038] last:border-b-0 ${
+                      rowDimmed ? "opacity-60" : ""
+                    }`}
+                  >
                     <td className="px-3 py-2 tabular-nums text-[#F7F8FA]">
                       {formatFace(row.azimuthBucket, row.azimuthDegrees)}
                     </td>
@@ -89,12 +121,16 @@ export function SegmentBreakdown({ rows, totalPanels, totalSystemKwp, mpptString
                         <span className="text-[#5B6470]">
                           0 <em className="ml-1 italic text-[#5B6470]">(skipped: {row.skipReason ?? "n/a"})</em>
                         </span>
+                      ) : off ? (
+                        <span className="text-[#5B6470]">
+                          0 <em className="ml-1 italic">(off)</em>
+                        </span>
                       ) : (
                         <span className="text-[#F7F8FA]">{row.panelsAllocated}</span>
                       )}
                     </td>
                     <td className="px-3 py-2">
-                      {skipped ? (
+                      {skipped || off ? (
                         <span className="text-[#5B6470]">—</span>
                       ) : (
                         <span
@@ -117,9 +153,26 @@ export function SegmentBreakdown({ rows, totalPanels, totalSystemKwp, mpptString
                       {skipped ? (
                         <span className="text-[#5B6470]">—</span>
                       ) : (
-                        `${Math.round(row.yieldKwhPerYear).toLocaleString()} kWh`
+                        `${Math.round(yieldPerPanelKwh).toLocaleString()} kWh`
                       )}
                     </td>
+                    {canToggle ? (
+                      <td className="px-3 py-2 text-right">
+                        <button
+                          type="button"
+                          onClick={() => onToggleSegment?.(row.index)}
+                          className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider transition-colors ${
+                            off
+                              ? "border-[#5B6470] bg-[#0A0E1A] text-[#5B6470] hover:border-[#62E6A7] hover:text-[#62E6A7]"
+                              : "border-[#62E6A7]/40 bg-[#62E6A7]/10 text-[#62E6A7] hover:border-[#F2B84B] hover:bg-[#F2B84B]/15 hover:text-[#F2B84B]"
+                          }`}
+                          aria-pressed={!off}
+                          aria-label={`Toggle segment ${row.index} ${off ? "on" : "off"}`}
+                        >
+                          {off ? "Off" : "On"}
+                        </button>
+                      </td>
+                    ) : null}
                   </tr>
                 );
               })}
