@@ -50,6 +50,7 @@ interface RoofFactsResponse {
     areaMeters2?: number;
     annualSunshineHours?: number;
     planeHeightAtCenterMeters?: number;
+    center?: { latitude?: number; longitude?: number };
   }>;
   totalAreaM2?: number;
   solarPanels?: Array<{
@@ -63,6 +64,10 @@ interface RoofFactsResponse {
     segmentCenterLat?: number;
     segmentCenterLng?: number;
   }>;
+  boundingBox?: {
+    sw: { latitude: number; longitude: number };
+    ne: { latitude: number; longitude: number };
+  };
 }
 
 /** Watt-peak per panel — matches lib/sizing/calculate.ts (440W modules). */
@@ -264,6 +269,8 @@ export function InstallerLeadDetail({ lead, onLeadChange }: Props) {
   const [liveTotalAreaM2, setLiveTotalAreaM2] = useState<number | null>(null);
   const [livePitchDeg, setLivePitchDeg] = useState<number | null>(null);
   const [liveSegments, setLiveSegments] = useState<RoofSegment[] | null>(null);
+  const [overlayRoofSegments, setOverlayRoofSegments] =
+    useState<NonNullable<RoofFactsResponse["segments"]>>([]);
   const [liveLoading, setLiveLoading] = useState(true);
   const [liveError, setLiveError] = useState(false);
 
@@ -336,6 +343,7 @@ export function InstallerLeadDetail({ lead, onLeadChange }: Props) {
     setManuallyAddedPanels([]);
     setRemovedPanelKeys(new Set());
     setDisabledSegmentIndexes(new Set());
+    setOverlayRoofSegments([]);
     setEditMode(false);
     setHeatmapMeta(null);
     setHeatmapSampler(null);
@@ -389,6 +397,7 @@ export function InstallerLeadDetail({ lead, onLeadChange }: Props) {
 
         setLiveSizing(sizing);
         setLiveSegments(segments);
+        setOverlayRoofSegments(rawSegments);
         setLiveTotalAreaM2(typeof data.totalAreaM2 === "number" ? data.totalAreaM2 : null);
         setLivePitchDeg(median(segments.map((s) => s.pitchDegrees)));
 
@@ -780,6 +789,7 @@ export function InstallerLeadDetail({ lead, onLeadChange }: Props) {
           onPanelAdd={addManualPanel}
           defaultAzimuthDegrees={dominantAzimuthDegrees}
           defaultPitchDegrees={dominantPitchDegrees}
+          roofSegments={overlayRoofSegments}
         />
         <SunHeatmapCesium
           viewer={cesiumViewer}

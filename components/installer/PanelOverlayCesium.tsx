@@ -66,6 +66,15 @@ interface Props {
    *  Used by the plane-fit so manual panels tilt with the dominant roof
    *  slope rather than rendering flat at the picked mesh height. */
   defaultPitchDegrees?: number;
+  /** Solar API roof segments with centers. Used to infer the clicked roof
+   *  plane for manually-placed panels instead of falling back to the dominant
+   *  whole-roof segment. */
+  roofSegments?: Array<{
+    pitchDegrees?: number;
+    azimuthDegrees?: number;
+    planeHeightAtCenterMeters?: number;
+    center?: { latitude?: number; longitude?: number };
+  }>;
 }
 
 // Real-world residential panel dimensions. Default to a 440 Wp M10 module
@@ -82,6 +91,7 @@ const PANEL_HEIGHT_OFFSET_M = 0.15; // hover ~15 cm above the roof plane
 const PANEL_THICKNESS_M = 0.05;
 const FLAT_SEGMENT_PITCH_DEGREES = 5;
 const ENTITY_NAME_PREFIX = "panel-";
+const MANUAL_ENTITY_NAME_PREFIX = "manual-";
 
 const ACTIVE_COLOR = "#3DAEFF";       // AI-placed, active
 const REMOVED_COLOR = "#F2B84B";      // toggled off (obstruction)
@@ -89,6 +99,70 @@ const MANUAL_COLOR = "#62E6A7";       // manually placed by installer
 
 export function panelKey(idx: number, lat: number, lng: number): string {
   return `${ENTITY_NAME_PREFIX}${idx}-${lat.toFixed(6)}-${lng.toFixed(6)}`;
+}
+
+function isPanelEntityName(name: unknown): name is string {
+  return (
+    typeof name === "string" &&
+    (name.startsWith(ENTITY_NAME_PREFIX) ||
+      name.startsWith(MANUAL_ENTITY_NAME_PREFIX))
+  );
+}
+
+function distanceMeters2(
+  latA: number,
+  lngA: number,
+  latB: number,
+  lngB: number,
+): number {
+  const meanLat = ((latA + latB) / 2) * Math.PI / 180;
+  const safeCosLat = Math.max(1e-6, Math.abs(Math.cos(meanLat)));
+  const dN = (latA - latB) * 111_320;
+  const dE = (lngA - lngB) * 111_320 * safeCosLat;
+  return dN * dN + dE * dE;
+}
+
+function nearestRoofSegment(
+  lat: number,
+  lng: number,
+  segments: NonNullable<Props["roofSegments"]>,
+): { index: number; segment: NonNullable<Props["roofSegments"]>[number]; distance2: number } | null {
+  let best:
+    | { index: number; segment: NonNullable<Props["roofSegments"]>[number]; distance2: number }
+    | null = null;
+  for (let index = 0; index < segments.length; index += 1) {
+    const segment = segments[index];
+    const segLat = segment.center?.latitude;
+    const segLng = segment.center?.longitude;
+    if (!Number.isFinite(segLat) || !Number.isFinite(segLng)) continue;
+    const distance2 = distanceMeters2(lat, lng, segLat as number, segLng as number);
+    if (!best || distance2 < best.distance2) {
+      best = { index, segment, distance2 };
+    }
+  }
+  return best;
+}
+
+function segmentAnchorHeightForPickedPoint(
+  pickedLat: number,
+  pickedLng: number,
+  segLat: number,
+  segLng: number,
+  pickedHeight: number,
+  pitchDeg: number,
+  azimuthDeg: number,
+): number {
+  if (!Number.isFinite(pickedHeight) || pitchDeg <= 0.5) return pickedHeight;
+  const tanPitch = Math.tan((pitchDeg * Math.PI) / 180);
+  const azRad = (azimuthDeg * Math.PI) / 180;
+  const downE = Math.sin(azRad);
+  const downN = Math.cos(azRad);
+  const cosLat = Math.cos((segLat * Math.PI) / 180);
+  const safeCosLat = Math.abs(cosLat) < 1e-6 ? 1e-6 : cosLat;
+  const dE = (pickedLng - segLng) * 111_320 * safeCosLat;
+  const dN = (pickedLat - segLat) * 111_320;
+  const downhillDist = dE * downE + dN * downN;
+  return pickedHeight + tanPitch * downhillDist;
 }
 
 /**
@@ -320,7 +394,7 @@ function clearPanelEntities(viewer: CesiumViewer): void {
   // Iterate over a copy because removeById mutates the underlying array.
   const toRemove = entities.filter(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (e: any) => typeof e?.name === "string" && e.name.startsWith(ENTITY_NAME_PREFIX),
+    (e: any) => isPanelEntityName(e?.name),
   );
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   toRemove.forEach((e: any) => {
@@ -343,6 +417,7 @@ export function PanelOverlayCesium({
   onPanelAdd,
   defaultAzimuthDegrees = 0,
   defaultPitchDegrees = 0,
+  roofSegments = [],
 }: Props) {
   // Stash the latest callbacks + edit-mode flag in refs so the
   // ScreenSpaceEventHandler — which is keyed only on `viewer` — always reads
@@ -352,6 +427,7 @@ export function PanelOverlayCesium({
   const onPanelAddRef = useRef<((panel: SolarPanelEntry) => void) | undefined>(onPanelAdd);
   const defaultAzimuthRef = useRef(defaultAzimuthDegrees);
   const defaultPitchRef = useRef(defaultPitchDegrees);
+  const roofSegmentsRef = useRef(roofSegments);
 
   useEffect(() => {
     onClickRef.current = onPanelClick;
@@ -368,6 +444,9 @@ export function PanelOverlayCesium({
   useEffect(() => {
     defaultPitchRef.current = defaultPitchDegrees;
   }, [defaultPitchDegrees]);
+  useEffect(() => {
+    roofSegmentsRef.current = roofSegments;
+  }, [roofSegments]);
 
   // -------------------------------------------------------------------------
   // Render panel polygons.
@@ -607,11 +686,16 @@ export function PanelOverlayCesium({
     })();
 
     return () => {
+      // Don't clearPanelEntities() here. The render effect's body already
+      // calls clearPanelEntities() at the start of every renderPanels() pass
+      // BEFORE adding the new entity batch — atomic clear+add. If we ALSO
+      // wipe entities in the cleanup, every dep change leaves a visible
+      // window where the user sees no panels while the new effect's
+      // `await import("cesium")` resolves. That window manifests as the
+      // "panels sometimes show, sometimes not" flicker the user reported.
+      // Final unmount cleanup is handled by a separate useEffect below
+      // (the one keyed only on `viewer`).
       cancelled = true;
-      if (viewer && !viewer.isDestroyed?.()) {
-        clearPanelEntities(viewer);
-        viewer.scene?.requestRender?.();
-      }
     };
   }, [viewer, panels, desiredCount, removedKeys, visible]);
 
@@ -644,7 +728,7 @@ export function PanelOverlayCesium({
             const picked = viewer.scene.pick(event.position);
             const name: unknown = picked?.id?.name;
             // Hit an existing panel polygon → toggle remove
-            if (typeof name === "string" && name.startsWith(ENTITY_NAME_PREFIX)) {
+            if (isPanelEntityName(name)) {
               onClickRef.current(name);
               return;
             }
@@ -656,19 +740,39 @@ export function PanelOverlayCesium({
             const cartographic = Cesium.Cartographic.fromCartesian(worldPos);
             const lat = Cesium.Math.toDegrees(cartographic.latitude);
             const lng = Cesium.Math.toDegrees(cartographic.longitude);
+            const nearest = nearestRoofSegment(lat, lng, roofSegmentsRef.current);
+            const nearestSegment = nearest?.segment;
+            const segmentCenterLat = nearestSegment?.center?.latitude;
+            const segmentCenterLng = nearestSegment?.center?.longitude;
+            const segmentAzimuthDegrees =
+              nearestSegment?.azimuthDegrees ?? defaultAzimuthRef.current;
+            const segmentPitchDegrees =
+              nearestSegment?.pitchDegrees ?? defaultPitchRef.current;
+            const hasSegmentCenter =
+              Number.isFinite(segmentCenterLat) && Number.isFinite(segmentCenterLng);
+            const anchorLat = hasSegmentCenter ? (segmentCenterLat as number) : lat;
+            const anchorLng = hasSegmentCenter ? (segmentCenterLng as number) : lng;
             const newPanel: SolarPanelEntry = {
               center: { latitude: lat, longitude: lng },
               orientation: "LANDSCAPE",
               segmentIndex: -1,
               yearlyEnergyDcKwh: 0,
-              segmentAzimuthDegrees: defaultAzimuthRef.current,
-              segmentPitchDegrees: defaultPitchRef.current,
-              // Anchor the plane at the panel's own center so plane-fit passes
-              // through the picked mesh height; corners tilt around it using
-              // the dominant pitch/azimuth.
-              segmentCenterLat: lat,
-              segmentCenterLng: lng,
-              segmentHeightMeters: cartographic.height,
+              segmentAzimuthDegrees,
+              segmentPitchDegrees,
+              // Anchor the plane at the nearest Solar API segment center, but
+              // solve the anchor height so the plane still passes through the
+              // clicked mesh point.
+              segmentCenterLat: anchorLat,
+              segmentCenterLng: anchorLng,
+              segmentHeightMeters: segmentAnchorHeightForPickedPoint(
+                lat,
+                lng,
+                anchorLat,
+                anchorLng,
+                cartographic.height,
+                segmentPitchDegrees,
+                segmentAzimuthDegrees,
+              ),
               manual: true,
             };
             onPanelAddRef.current(newPanel);

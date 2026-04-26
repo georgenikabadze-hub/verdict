@@ -1,7 +1,60 @@
 # Verdict — Session Handoff for Next Window
 
-> **Read this first.** Big Berlin Hack 2026, **Reonic track**. Submission deadline: **Sunday 2026-04-26 14:00 Berlin** (~10–11 hours away as of 03:05 Sun morning).
-> Then read `AGENTS.md`, then `README.md`. Memory at `~/.claude/projects/-Users-georgenikabadze/memory/project_bigberlin_hackathon.md` has the hackathon-meta context (track rules, partner-tech list, side prizes).
+> **Read this first.** Big Berlin Hack 2026, **Reonic track**. Read `README.md` for the full submission narrative. Memory at `~/.claude/projects/-Users-georgenikabadze/memory/project_bigberlin_hackathon.md` has the hackathon-meta context (track rules, partner-tech list, side prizes).
+
+---
+
+## 🆕 LATE-SESSION HANDOFF (2026-04-26 ~12:00) — new window picking up
+
+**Read this section first, ignore the older sections below — they describe earlier states.**
+
+### Repo state right now
+- `origin/main` HEAD: **`3e49aff`** (Solar API Data Layers — sun heatmap painted on photoreal roof + bounds fix + alignment improvements). Vercel auto-deploying.
+- `origin/design`: at `8bab7ad`, available for Robin's Lovable work.
+- Localhost dev server running (`pnpm dev` was kicked at 10:45). May need restart to pick up newer commits — `pkill -f "next dev"` then `pnpm dev`.
+
+### What landed in this session (commits ahead of `09bc55b`)
+1. `8bab7ad` — per-segment height sampling + V-only row snap + sizer demand cap + OSM picker tightening + stacked layout + cross-platform wheel zoom guard.
+2. `41c17de` — per-segment ON/OFF toggle column + kWh/panel/yr column in SegmentBreakdown.
+3. `8bc8088` — InstallerMarketplace refetches `/api/leads` on mount + focus (papers over Vercel cross-lambda gap until persistence layer ships).
+4. `d71ab60` — top-1-segment filter, yield-weighted savings recompute, BoM count source-of-truth, toolbar moved to bottom-right.
+5. `3e49aff` — Solar API Data Layers heatmap (sun map on the roof). `/api/data-layers` proxy + `/api/heatmap` PNG renderer + `SunHeatmapCesium` overlay component. Toggle on the panel toolbar. Color: green = high yield, red = low yield.
+
+### What's UNCOMMITTED right now (Codex actively running)
+Codex is mid-edit on a workspace-write task fixing three connected bugs:
+- **B1** Manual-panel click-to-remove fails because manual entity keys are `"manual-N"` and the click handler matches `"panel-"` prefix only.
+- **B2** Manual panels currently use the dominant-segment azimuth+pitch instead of inheriting from the segment under the click point.
+- **B3** Heatmap centered on geocoded lat/lng (not Solar API building bbox center) drifts ~3–10 m visually.
+
+Codex prompt at `/tmp/verdict_codex_manual_panel_prompt.txt`. Output going to `/tmp/verdict_codex_manual_panel.log`. PID `bwyxsx3xi`. **Do not edit `PanelOverlayCesium.tsx`, `InstallerLeadDetail.tsx`, or `app/api/data-layers/route.ts` until Codex is done** — `pgrep -fl "codex exec"` to check.
+
+### Known issue queued for next round (post-Codex-current)
+- **Flicker bug.** Panels and sun layer "sometimes show, sometimes not." Diagnosed: `clearPanelEntities(viewer)` in the render-effect cleanup (PanelOverlayCesium.tsx ~line 612) wipes entities on every dep change; the new effect's Phase 1 has to await `import("cesium")` before re-adding. User sees blink. Same pattern in SunHeatmapCesium cleanup. Fix: remove `clearPanelEntities` from the cleanup function; the effect body's `clearPanelEntities` at the start of `renderPanels` already handles atomic clear+add. Unmount cleanup is in a separate useEffect.
+- Ranked plan written at `/tmp/verdict_race_diagnosis_prompt.txt` for the new window to fire at Codex/Gemini if needed.
+
+### Outstanding items the user asked for
+- Heatmap legend (gradient strip with "low sun ←→ high sun" labels) — 5-min addition.
+- Monthly heatmap variant (`monthlyFluxUrl`) — 12 layers, slider UI.
+- Hourly heatmap scrubber (`hourlyShadeUrls`) — 24 layers, animated.
+- Per-segment kWh/m²/yr integrated total, sourced from the raster instead of Solar API segment-uniform values.
+- Persistence layer (Firestore preferred per user, or Vercel KV) — current in-memory store loses leads on Vercel cold start + dev restart.
+- The **eternal localStorage 404 polling** — old leadIds keep polling `/api/leads/<id>` after store wipes. Add a 404-clears-localStorage hygiene step in `InstallerApprovedToast`.
+
+### Current working address for testing
+`Nebinger Str. 4, 14195 Berlin` — Steglitz-Zehlendorf single-family with mature tree canopy, geocoded to (52.4433448, 13.2773335). 9 segments, 39 Solar API panels, 175 m² roof. Good test case for sun-aware placement because trees create dramatic shading.
+
+### To pick up in a fresh window
+1. `cat STATUS.md` (you are here)
+2. `cat README.md` for the user-facing submission story
+3. `git log --oneline -10` to see recent commits
+4. `git status` — if anything uncommitted, check Codex isn't still editing (`pgrep -fl "codex exec"`)
+5. Test on `localhost:3000` — submit homeowner intake on Nebinger Str. 4, then visit `/installer`. Verify: panels visible on roof, sun layer toggle works, BoM total agrees with panel count, segment toggles in sidebar work.
+6. If flicker persists after Codex finishes the current batch, apply the cleanup fix described in "Known issue queued for next round" above.
+7. User has explicitly said "do not care about deadline, do as perfect as possible" — universal robustness over whitelisted demo addresses.
+
+---
+
+## (Earlier session notes — kept for archeology, may be stale)
 
 ---
 

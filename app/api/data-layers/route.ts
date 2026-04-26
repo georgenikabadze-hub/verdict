@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDataLayers } from "@/lib/api/solar";
+import { getBuildingInsights, getDataLayers } from "@/lib/api/solar";
 import { generateAnnualHeatmap } from "@/lib/heatmaps/generate";
 
 export const dynamic = "force-dynamic";
@@ -14,6 +14,51 @@ function fallbackBounds(lat: number, lng: number, radiusMeters = 50) {
     west: lng - dLng,
     north: lat + dLat,
     east: lng + dLng,
+  };
+}
+
+interface LatLng {
+  latitude?: number;
+  longitude?: number;
+}
+
+interface BoundingBox {
+  sw?: LatLng;
+  ne?: LatLng;
+}
+
+interface BuildingInsightsResponse {
+  boundingBox?: BoundingBox;
+}
+
+function paddedBoundingBoxBounds(boundingBox: BoundingBox | undefined, paddingMeters = 5) {
+  const swLat = boundingBox?.sw?.latitude;
+  const swLng = boundingBox?.sw?.longitude;
+  const neLat = boundingBox?.ne?.latitude;
+  const neLng = boundingBox?.ne?.longitude;
+  if (
+    !Number.isFinite(swLat) ||
+    !Number.isFinite(swLng) ||
+    !Number.isFinite(neLat) ||
+    !Number.isFinite(neLng)
+  ) {
+    return null;
+  }
+
+  const south = Math.min(swLat as number, neLat as number);
+  const north = Math.max(swLat as number, neLat as number);
+  const west = Math.min(swLng as number, neLng as number);
+  const east = Math.max(swLng as number, neLng as number);
+  const centerLat = (south + north) / 2;
+  const dLat = paddingMeters / 111_320;
+  const cosLat = Math.max(0.0001, Math.abs(Math.cos((centerLat * Math.PI) / 180)));
+  const dLng = paddingMeters / (111_320 * cosLat);
+
+  return {
+    south: south - dLat,
+    west: west - dLng,
+    north: north + dLat,
+    east: east + dLng,
   };
 }
 
@@ -42,9 +87,10 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const [{ data, apiStatus }, heatmap] = await Promise.all([
+    const [{ data, apiStatus }, heatmap, buildingInsights] = await Promise.all([
       getDataLayers(lat, lng),
       generateAnnualHeatmap(lat, lng),
+      getBuildingInsights(lat, lng).catch(() => null),
     ]);
     const layers = (data ?? {}) as DataLayersResponse;
 
@@ -60,15 +106,17 @@ export async function GET(req: NextRequest) {
       );
     }
 
+    const building = buildingInsights?.data as BuildingInsightsResponse | null | undefined;
+    const solarBounds = paddedBoundingBoxBounds(building?.boundingBox);
     const qs = new URLSearchParams({ lat: String(lat), lng: String(lng) });
     return NextResponse.json({
       annualFluxUrl: layers.annualFluxUrl,
       imageUrl: `/api/heatmap?${qs.toString()}`,
       // Google annualFlux GeoTIFF bounds can be projected metres (for Berlin,
-      // UTM zone 33N), while Cesium rectangles require WGS84 degrees. The
-      // Data Layers request is radius-based, so use that known request radius
-      // for a stable viewer overlay instead of leaking raster CRS coordinates.
-      bounds: fallbackBounds(lat, lng),
+      // UTM zone 33N), while Cesium rectangles require WGS84 degrees. Use the
+      // Solar API building bbox, padded slightly, so the heatmap is registered
+      // to the building rather than the geocoded address point.
+      bounds: solarBounds ?? fallbackBounds(lat, lng),
       width: heatmap.width,
       height: heatmap.height,
       fluxRange: heatmap.fluxRange,

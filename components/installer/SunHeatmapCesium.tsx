@@ -102,8 +102,12 @@ export function SunHeatmapCesium({ viewer, heatmap, visible }: Props) {
     })();
 
     return () => {
+      // Don't clearHeatmap() here — the render body already does an atomic
+      // clear+add when heatmap/visible change. Wiping the imagery in the
+      // cleanup left the user with a "sometimes works, sometimes not"
+      // flicker because the effect re-fires on every panels prop change in
+      // the parent (parent re-renders propagate through Sun toggle state).
       cancelled = true;
-      clearHeatmap(viewer);
     };
   }, [viewer, heatmap, visible]);
 
