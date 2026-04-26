@@ -49,6 +49,10 @@ Open http://localhost:3000.
 
 Required environment variables are listed in `.env.example`.
 
+## Technical documentation
+
+For jury deep-dive, see [`AUDIT_REPORT.md`](./AUDIT_REPORT.md) — bug analysis with `file:line` references, root causes, minimal fixes, risk levels, fix status, and verification (tsc, unit tests).
+
 ## Authors
 
 - Ahmed Sohail — ahmed.sohail@code.berlin
