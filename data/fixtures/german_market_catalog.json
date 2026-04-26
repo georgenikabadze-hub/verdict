@@ -46,6 +46,33 @@
       "currency": "EUR",
       "sourceUrl": "https://www.trinasolar.com/",
       "sourceTitle": "Trina Solar"
+    },
+    {
+      "brand": "Longi",
+      "model": "Hi-MO X10 Scientist 540",
+      "wp": 540,
+      "eurEx": 135,
+      "currency": "EUR",
+      "sourceUrl": "https://www.longi.com/de/products/modules/hi-mo-x10/",
+      "sourceTitle": "Longi Hi-MO X10 540W"
+    },
+    {
+      "brand": "Trina Solar",
+      "model": "Vertex N TSM-NEG21C.20 605W",
+      "wp": 605,
+      "eurEx": 150,
+      "currency": "EUR",
+      "sourceUrl": "https://www.trinasolar.com/en/product/Vertex-N",
+      "sourceTitle": "Trina Vertex N 605W"
+    },
+    {
+      "brand": "JA Solar",
+      "model": "DeepBlue 4.0 Pro JAM72D40 580W",
+      "wp": 580,
+      "eurEx": 140,
+      "currency": "EUR",
+      "sourceUrl": "https://www.jasolar.com/html/de/index.html",
+      "sourceTitle": "JA Solar DeepBlue 4.0 Pro"
     }
   ],
   "inverters": [

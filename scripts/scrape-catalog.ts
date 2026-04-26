@@ -264,7 +264,7 @@ async function main() {
     heatPumps: [],
     mounts:    [],
   };
-  for (const [cat, { items }] of results) (catalog as Record<string, unknown>)[cat] = items;
+  for (const [cat, { items }] of results) (catalog as unknown as Record<string, unknown>)[cat] = items;
 
   const out = resolve(REPO_ROOT, "data/fixtures/german_market_catalog.json");
   mkdirSync(dirname(out), { recursive: true });
@@ -272,7 +272,7 @@ async function main() {
   console.log(`\nwrote ${out}`);
   console.log(`source: ${catalog.source}`);
   for (const cat of cats) {
-    console.log(`  ${cat}: ${(catalog as Record<string, unknown[]>)[cat].length} items`);
+    console.log(`  ${cat}: ${(catalog as unknown as Record<string, unknown[]>)[cat].length} items`);
   }
 }
 

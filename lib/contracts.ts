@@ -4,6 +4,8 @@
 export type Heating = "gas" | "oil" | "district" | "heat_pump" | "electric";
 export type Goal = "lower_bill" | "independence";
 export type Strategy = "margin" | "closeRate" | "ltv";
+/** Three-state homeowner preference. "idk" = "show me both with and without so I can compare". */
+export type Preference = "yes" | "no" | "idk";
 
 export interface Intake {
   address: string;
@@ -11,7 +13,14 @@ export interface Intake {
   lng: number;
   monthlyBillEur: number;
   annualKwh?: number;
+  /** Legacy boolean. New UI sets this from evPref==="yes". Both fields present until full migration. */
   ev: boolean;
+  /** Three-state EV charger preference (new homeowner UI). */
+  evPref?: Preference;
+  /** Three-state battery preference (new homeowner UI). */
+  wantsBattery?: Preference;
+  /** Three-state heat pump preference (new homeowner UI). */
+  wantsHeatPump?: Preference;
   heating: Heating;
   goal: Goal;
 }

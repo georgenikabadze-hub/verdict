@@ -5,6 +5,11 @@ import dynamic from "next/dynamic";
 interface Props {
   coords: { lat: number; lng: number };
   address: string | null;
+  /** Optional: receive the Cesium Viewer instance once it's mounted. Used by
+   *  installer-side overlays (e.g. PanelOverlayCesium) that need to add
+   *  entities on top of the photoreal mesh. Pass `null` on teardown. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  onViewerReady?: (viewer: any | null) => void;
 }
 
 // Lazy-load the heavy CesiumJS bundle (≈4 MB gzipped). It must run client-only
@@ -41,8 +46,14 @@ function CesiumSkeleton() {
   );
 }
 
-export function CesiumRoofView({ coords, address }: Props) {
-  return <CesiumRoofViewInner coords={coords} address={address} />;
+export function CesiumRoofView({ coords, address, onViewerReady }: Props) {
+  return (
+    <CesiumRoofViewInner
+      coords={coords}
+      address={address}
+      onViewerReady={onViewerReady}
+    />
+  );
 }
 
 export default CesiumRoofView;

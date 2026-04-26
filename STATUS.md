@@ -18,6 +18,48 @@
 
 ---
 
+## 🔄 SESSION HANDOFF (2026-04-26 ~10:00 Sun) — context window too big, opening fresh
+
+**For the new Claude Code session: read this section first, then the MORNING PIVOT below for the original plan.**
+
+### What just shipped (all committed + pushed)
+- ✅ Tavily + Gemini scrape pipeline (`scripts/scrape-catalog.ts`, `pnpm scrape:catalog`) → `data/fixtures/german_market_catalog.json` with 8 panels, 4 inverters, 3 batteries, 5 wallboxes, 3 heat pumps, 4 mounts. Real Tavily-sourced URLs (Tesla Powerwall 3, BYD Premium LVL, Vaillant Arotherm Pro from pv-magazine, SMA Sunny Tripower 8/10, Huawei SUN2000-10KTL-M1, plus added Longi 540W / Trina 605W / JA 580W cheaper-per-Wp commercial panels).
+- ✅ NPV-optimal ROI sizer + composer (`lib/sizing/roi-optimizer.ts`, `lib/sizing/compose-from-market.ts`) replaces magic 1.1 demand-oversize. 15 new vitest tests (36/36 total passing).
+- ✅ Three-state Intake prefs: `wantsBattery`, `wantsHeatPump`, `evPref` ∈ "yes"|"no"|"idk". `idk` shows variants both ways so homeowner can compare.
+- ✅ Homeowner intake simplified to 5 fields: address + consumption (€/year OR kWh/year toggle, both are now ANNUAL — no more €/month) + 3 preference pills. Heating + goal removed from UI.
+- ✅ Demo seed leads dropped — marketplace starts empty, populates from real homeowner submissions only.
+- ✅ Installer detail rewritten: AI-prefetched technical brief card on top, 3 variant cards from cached catalog, every BoM line shows Tavily SourceUrlChip, Tavily attribution footer with scrape timestamp.
+- ✅ Cesium panel overlay (`components/installer/PanelOverlayCesium.tsx`): renders Google Solar API solarPanels[] as polygons on the photoreal mesh, click-to-remove (orange), click-to-add manual panels in edit mode (green), pro-rata recompute of monthly savings + payback as panels change.
+- ✅ Layout: side-by-side big Cesium left + narrow scrollable right column on xl screens; KPIs shrunk to compact pills.
+- ✅ Camera default switched from "oblique" (pitch -45°) to "roof" (pitch -70°, range 95) for a clearer top-down view of the building on first load.
+- ✅ Cesium clip sanity check: when OSM polygon centroid is >25 m from Solar API bbox center, discard OSM and use Solar bbox (with buffer bumped from 5 m → 12 m). Fixes the "panels floating over a different building" bug.
+- ✅ Panel dimensions bumped from 1.65×0.99 → 1.72×1.13 (real 440 Wp M10 size) so panels read clearly against the building scale.
+
+### What's still BROKEN / NEEDS VERIFICATION on localhost
+1. **`Rheinstraße 12, 12159 Berlin` clipping**: the Playwright debug agent (`agentId: ad794c568395c3b80`) was launched to investigate — may have completed in the background. Check `/private/tmp/claude-501/-Users-georgenikabadze/f1954e90-7c6a-4312-85b4-e440fc417f3e/tasks/ad794c568395c3b80.output` for findings. The new clip-sanity-check should help but may not fix every weird-OSM-pick case.
+2. **Camera positioning**: user reported "looking at trees not the roof" on at least one address. The new "roof" preset (pitch -70°, range 95) should be better but ANY building taller than ~25 m can still leave the camera below the roofline if the lookAtTransform target falls back to ground. Watch for this.
+3. **Variant card numbers**: user has not yet verified the quantitative output. Compose-from-market should produce reasonable totalEur (€20k–€50k range for typical homes) — sanity check before demo.
+4. **Manual panel positions**: when click-to-add fires, the new panel uses `Cesium.scene.pickPosition()` which returns the photoreal mesh height. That's the actual roof, so manual panels should sit correctly. But verify visually.
+
+### Uncommitted as of this handoff
+Everything ABOVE the "What just shipped" entries marked ✅ is also part of working tree changes that need committing. The catalog scrape commit (478f0ba) is on `origin/main`. Subsequent UI/sizer/contracts/seed/payload work is in working tree. Run `git status` to see.
+
+### Recommended first 5 moves for the new session
+1. `cd /Users/georgenikabadze/Desktop/verdict && git status` — see uncommitted state
+2. `cat STATUS.md` — read this whole file
+3. `pnpm tsc --noEmit && pnpm test` — confirm 36/36 still green
+4. `pnpm dev` — start the dev server (kill any existing first: `pkill -f "next dev"`)
+5. End-to-end browser test: homeowner intake → submit → /installer → click your lead → verify (a) Cesium shows the right building, (b) AI panels sit ON the roof, (c) BoM has real catalog data with source URL chips, (d) edit mode add/remove works, (e) numbers look reasonable
+6. Once user confirms, commit + push. **Don't push without user confirmation per `feedback_localhost_before_push.md`.**
+
+### Still NOT done (deferred but in scope for the deadline)
+- **Lovable artifact** for partner-tech rule (~10 min): user goes to lovable.dev with coupon `COMM-BIG-PVDK`, generates a card, paste output into `components/installer/VariantCardLovable.tsx`, mount it somewhere visible. Header comment `// Generated initial scaffold via Lovable (Big Berlin Hack 2026)` is what counts.
+- **Loom recording** (~30 min): user records on localhost (Tavily live there).
+- **BBHack submission form** (~10 min): user submits with GitHub URL + Vercel URL + Loom URL.
+- **Aikido side prize** (~15 min): €1k for "Most Secure Build" — user signs up + connects repo + screenshots scan.
+
+---
+
 ## 🎯 MORNING PIVOT — Tavily-powered installer flow (decided 2026-04-26 ~03:30 Sun)
 
 **This supersedes the old "Open work" section below.** The next session should execute this plan, not the old one.

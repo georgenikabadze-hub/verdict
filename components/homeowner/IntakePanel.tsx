@@ -1,20 +1,16 @@
 "use client";
 
 import { useState } from "react";
-import type { Heating, Goal } from "@/lib/contracts";
+import type { Preference } from "@/lib/contracts";
 import { tryParseCoords } from "@/lib/parse-coords";
 import { AddressAutocomplete } from "./AddressAutocomplete";
 
-const HEATING_OPTIONS: { value: Heating; label: string; emoji: string }[] = [
-  { value: "gas", label: "Gas", emoji: "🔥" },
-  { value: "oil", label: "Oil", emoji: "🛢" },
-  { value: "heat_pump", label: "Heat pump", emoji: "♻︎" },
-  { value: "district", label: "District", emoji: "🏘" },
-];
+type ConsumptionMode = "kwh" | "bill";
 
-const GOAL_OPTIONS: { value: Goal; label: string; sub: string }[] = [
-  { value: "lower_bill", label: "Lower my bill", sub: "Maximise ROI" },
-  { value: "independence", label: "Become independent", sub: "Maximise autarky" },
+const PREF_OPTIONS: { value: Preference; label: string }[] = [
+  { value: "yes", label: "Yes" },
+  { value: "no", label: "No" },
+  { value: "idk", label: "Not sure" },
 ];
 
 interface Props {
@@ -23,10 +19,12 @@ interface Props {
 
 export function IntakePanel({ onLocate }: Props = {}) {
   const [address, setAddress] = useState("");
-  const [bill, setBill] = useState(120);
-  const [ev, setEv] = useState(false);
-  const [heating, setHeating] = useState<Heating>("gas");
-  const [goal, setGoal] = useState<Goal>("lower_bill");
+  const [consumptionMode, setConsumptionMode] = useState<ConsumptionMode>("bill");
+  const [annualKwh, setAnnualKwh] = useState<string>("");
+  const [annualBill, setMonthlyBill] = useState<string>("");
+  const [wantsBattery, setWantsBattery] = useState<Preference>("idk");
+  const [wantsHeatPump, setWantsHeatPump] = useState<Preference>("idk");
+  const [evPref, setEvPref] = useState<Preference>("idk");
   const [locating, setLocating] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [resolving, setResolving] = useState(false);
@@ -110,14 +108,39 @@ export function IntakePanel({ onLocate }: Props = {}) {
     }
   };
 
+  // Validation: address + at least one consumption value (the active mode's value)
+  const consumptionFilled =
+    consumptionMode === "kwh"
+      ? Number(annualKwh) > 0
+      : Number(annualBill) > 0;
+  const canSubmit = address.trim().length > 0 && consumptionFilled;
+
+  // Both inputs are now per-year. Derive monthly bill (legacy field) by /12 when in bill mode,
+  // or from annualKwh × 0.32 / 12 when in kWh mode.
+
   const submit = () => {
+    if (!canSubmit) return;
+    // Internally still set heating + goal (defaults) — lib/contracts.ts requires them.
+    // Translate consumption mode → annualBillEur (always send a numeric bill).
+    // If the user picked kWh, derive a synthetic monthly bill from annualKwh × 0.32 / 12
+    // so the legacy field is populated; the new annualKwh field is also passed through.
+    const derivedMonthlyBill =
+      consumptionMode === "bill"
+        ? Math.round(Number(annualBill) / 12)
+        : Math.round((Number(annualKwh) * 0.32) / 12);
     const params = new URLSearchParams({
       address,
-      bill: String(bill),
-      ev: String(ev),
-      heating,
-      goal,
+      bill: String(derivedMonthlyBill || 120),
+      ev: String(evPref === "yes"),
+      heating: "gas",
+      goal: "lower_bill",
+      evPref,
+      wantsBattery,
+      wantsHeatPump,
     });
+    if (consumptionMode === "kwh" && Number(annualKwh) > 0) {
+      params.set("annualKwh", String(Number(annualKwh)));
+    }
     window.location.href = `/quote?${params.toString()}`;
   };
 
@@ -172,98 +195,111 @@ export function IntakePanel({ onLocate }: Props = {}) {
         )}
       </div>
 
-      {/* Bill slider */}
+      {/* Consumption — toggle between kWh/year OR monthly bill (€) */}
       <div className="flex flex-col gap-1.5">
-        <div className="flex items-baseline justify-between">
-          <label htmlFor="bill" className="text-[10px] uppercase tracking-wider text-[#9BA3AF]">
-            Electricity bill / month
-          </label>
-          <span className="text-base font-semibold tabular-nums text-[#F7F8FA]">€{bill}</span>
-        </div>
-        <input
-          id="bill"
-          type="range"
-          min={40}
-          max={500}
-          step={10}
-          value={bill}
-          onChange={(e) => setBill(Number(e.target.value))}
-          className="accent-[#3DAEFF]"
-        />
-      </div>
-
-      {/* EV */}
-      <div className="flex items-center justify-between gap-3">
-        <span className="text-[10px] uppercase tracking-wider text-[#9BA3AF]">Electric vehicle</span>
-        <div className="flex rounded-lg border border-[#2A3038] overflow-hidden">
-          <button
-            type="button"
-            onClick={() => setEv(false)}
-            className={`px-3 py-1.5 text-xs transition-colors ${!ev ? "bg-[#12161C] text-[#F7F8FA]" : "text-[#9BA3AF] hover:text-[#F7F8FA]"}`}
+        <div className="flex items-center justify-between">
+          <span className="text-[10px] uppercase tracking-wider text-[#9BA3AF]">
+            Consumption
+          </span>
+          <div
+            role="radiogroup"
+            aria-label="Consumption input mode"
+            className="flex rounded-lg border border-[#2A3038] overflow-hidden"
           >
-            No
-          </button>
-          <button
-            type="button"
-            onClick={() => setEv(true)}
-            className={`px-3 py-1.5 text-xs transition-colors ${ev ? "bg-[#3DAEFF] text-[#0A0E1A]" : "text-[#9BA3AF] hover:text-[#F7F8FA]"}`}
-          >
-            Yes
-          </button>
-        </div>
-      </div>
-
-      {/* Heating segmented */}
-      <div className="flex flex-col gap-2">
-        <span className="text-xs uppercase tracking-wider text-[#9BA3AF]">Heating system</span>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          {HEATING_OPTIONS.map((opt) => (
             <button
-              key={opt.value}
               type="button"
-              onClick={() => setHeating(opt.value)}
-              className={`flex flex-col items-center gap-1 rounded-lg border px-2 py-3 text-xs transition-all ${
-                heating === opt.value
-                  ? "border-[#3DAEFF] bg-[#3DAEFF]/10 text-[#F7F8FA]"
-                  : "border-[#2A3038] bg-[#12161C] text-[#9BA3AF] hover:border-[#3DAEFF]/50"
+              role="radio"
+              aria-checked={consumptionMode === "bill"}
+              onClick={() => setConsumptionMode("bill")}
+              className={`px-3 py-1 text-[11px] transition-colors ${
+                consumptionMode === "bill"
+                  ? "bg-[#3DAEFF] text-[#0A0E1A]"
+                  : "text-[#9BA3AF] hover:text-[#F7F8FA]"
               }`}
             >
-              <span className="text-base">{opt.emoji}</span>
-              <span>{opt.label}</span>
+              € / year
             </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Goal */}
-      <div className="flex flex-col gap-2">
-        <span className="text-xs uppercase tracking-wider text-[#9BA3AF]">Your goal</span>
-        <div className="grid grid-cols-2 gap-2">
-          {GOAL_OPTIONS.map((opt) => (
             <button
-              key={opt.value}
               type="button"
-              onClick={() => setGoal(opt.value)}
-              className={`flex flex-col items-start gap-0.5 rounded-lg border px-4 py-3 text-left transition-all ${
-                goal === opt.value
-                  ? "border-[#3DAEFF] bg-[#3DAEFF]/10"
-                  : "border-[#2A3038] bg-[#12161C] hover:border-[#3DAEFF]/50"
+              role="radio"
+              aria-checked={consumptionMode === "kwh"}
+              onClick={() => setConsumptionMode("kwh")}
+              className={`px-3 py-1 text-[11px] transition-colors ${
+                consumptionMode === "kwh"
+                  ? "bg-[#3DAEFF] text-[#0A0E1A]"
+                  : "text-[#9BA3AF] hover:text-[#F7F8FA]"
               }`}
             >
-              <span className={`text-sm ${goal === opt.value ? "text-[#F7F8FA]" : "text-[#9BA3AF]"}`}>
-                {opt.label}
-              </span>
-              <span className="text-[10px] text-[#5B6470]">{opt.sub}</span>
+              kWh / year
             </button>
-          ))}
+          </div>
         </div>
+
+        {consumptionMode === "bill" ? (
+          <div className="relative">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[#5B6470]">
+              €
+            </span>
+            <input
+              id="bill"
+              type="number"
+              inputMode="numeric"
+              min={0}
+              step={5}
+              value={annualBill}
+              onChange={(e) => setMonthlyBill(e.target.value)}
+              placeholder="120"
+              className="w-full rounded-lg border border-[#2A3038] bg-[#12161C] pl-7 pr-16 py-2.5 text-sm text-[#F7F8FA] placeholder:text-[#5B6470] focus:outline-none focus:border-[#3DAEFF] focus:ring-2 focus:ring-[#3DAEFF]/30 transition-all"
+            />
+            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-[#5B6470]">
+              / month
+            </span>
+          </div>
+        ) : (
+          <div className="relative">
+            <input
+              id="kwh"
+              type="number"
+              inputMode="numeric"
+              min={0}
+              step={100}
+              value={annualKwh}
+              onChange={(e) => setAnnualKwh(e.target.value)}
+              placeholder="4500"
+              className="w-full rounded-lg border border-[#2A3038] bg-[#12161C] px-3 pr-20 py-2.5 text-sm text-[#F7F8FA] placeholder:text-[#5B6470] focus:outline-none focus:border-[#3DAEFF] focus:ring-2 focus:ring-[#3DAEFF]/30 transition-all"
+            />
+            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-[#5B6470]">
+              kWh / yr
+            </span>
+          </div>
+        )}
       </div>
+
+      {/* Three preference fields: battery, heat pump, EV */}
+      <ThreeStateRow
+        label="Battery?"
+        value={wantsBattery}
+        onChange={setWantsBattery}
+        groupName="battery"
+      />
+      <ThreeStateRow
+        label="Heat pump?"
+        value={wantsHeatPump}
+        onChange={setWantsHeatPump}
+        groupName="heatpump"
+      />
+      <ThreeStateRow
+        label="EV charger?"
+        value={evPref}
+        onChange={setEvPref}
+        groupName="ev"
+      />
 
       {/* CTA */}
       <button
         type="button"
         onClick={submit}
-        disabled={!address.trim()}
+        disabled={!canSubmit}
         className="mt-2 w-full rounded-lg bg-[#3DAEFF] px-5 py-4 text-base font-semibold text-[#0A0E1A] transition-all hover:bg-[#2EA1F0] disabled:bg-[#1F3A52] disabled:text-[#5B6470] disabled:cursor-not-allowed"
       >
         See my Verdict →
@@ -272,6 +308,49 @@ export function IntakePanel({ onLocate }: Props = {}) {
       <p className="text-[11px] text-[#5B6470] text-center">
         non-binding · no phone call · the installer reviews your Verdict and quotes within 24h
       </p>
+    </div>
+  );
+}
+
+interface ThreeStateRowProps {
+  label: string;
+  value: Preference;
+  onChange: (v: Preference) => void;
+  groupName: string;
+}
+
+function ThreeStateRow({ label, value, onChange, groupName }: ThreeStateRowProps) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="text-[10px] uppercase tracking-wider text-[#9BA3AF]">
+        {label}
+      </span>
+      <div
+        role="radiogroup"
+        aria-label={label}
+        className="flex rounded-lg border border-[#2A3038] overflow-hidden"
+      >
+        {PREF_OPTIONS.map((opt) => {
+          const active = value === opt.value;
+          return (
+            <button
+              key={opt.value}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              name={groupName}
+              onClick={() => onChange(opt.value)}
+              className={`px-3 py-1.5 text-xs transition-colors focus:outline-none focus:ring-2 focus:ring-[#3DAEFF]/40 focus:relative ${
+                active
+                  ? "bg-[#3DAEFF] text-[#0A0E1A]"
+                  : "text-[#9BA3AF] hover:text-[#F7F8FA]"
+              }`}
+            >
+              {opt.label}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }

@@ -2,14 +2,21 @@
 
 import { useState } from "react";
 import { Send, Check } from "lucide-react";
-import type { Goal, Heating, RoofSegment } from "@/lib/contracts";
+import type { Goal, Heating, Preference, RoofSegment } from "@/lib/contracts";
 
 interface Props {
   address: string;
   coords: { lat: number; lng: number };
   intake: {
     monthlyBillEur: number;
+    annualKwh?: number;
     ev: boolean;
+    /** Three-state EV preference (new homeowner UI). */
+    evPref?: Preference;
+    /** Three-state battery preference (new homeowner UI). */
+    wantsBattery?: Preference;
+    /** Three-state heat pump preference (new homeowner UI). */
+    wantsHeatPump?: Preference;
     heating: Heating;
     goal: Goal;
   };
@@ -36,7 +43,11 @@ export function SendToInstaller({ address, coords, intake, roofSegments }: Props
           lat: coords.lat,
           lng: coords.lng,
           monthlyBillEur: intake.monthlyBillEur,
+          annualKwh: intake.annualKwh,
           ev: intake.ev,
+          evPref: intake.evPref,
+          wantsBattery: intake.wantsBattery,
+          wantsHeatPump: intake.wantsHeatPump,
           heating: intake.heating,
           goal: intake.goal,
           roofSegments,

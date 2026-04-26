@@ -7,6 +7,10 @@ import { RoofMap3D } from "./RoofMap3D";
 interface Props {
   coords: { lat: number; lng: number };
   address: string | null;
+  /** Bubble the Cesium Viewer up to the parent (installer overlays etc.).
+   *  Called with the instance once mounted, and with `null` on teardown. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  onViewerReady?: (viewer: any | null) => void;
 }
 
 type Status = "loading" | "ready" | "error";
@@ -346,6 +350,38 @@ async function applyBuildingClip(
         ? pitches[0]
         : [...pitches].sort((a, b) => a - b)[Math.floor(pitches.length / 2)];
 
+  // ---- Sanity-check OSM polygon against Solar API bbox ----
+  // The AI per-panel placement (solarPanels[] in roofFacts) lives inside the
+  // Solar API bbox. If OSM picked a DIFFERENT nearby building (common in
+  // dense urban blocks where Overpass returns several candidates and the
+  // server picks by nearest-centroid), the clip mask will show that other
+  // building while the panels float over the actual one — clearly broken.
+  // When the two disagree by more than 25 m we discard the OSM polygon and
+  // fall through to the Solar bbox path below.
+  if (isUsableFootprint(osmFootprint) && roofFacts?.boundingBox) {
+    const sw = roofFacts.boundingBox.sw;
+    const ne = roofFacts.boundingBox.ne;
+    const bboxCenterLat = (sw.latitude + ne.latitude) / 2;
+    const bboxCenterLng = (sw.longitude + ne.longitude) / 2;
+    let osmSumLat = 0;
+    let osmSumLng = 0;
+    for (const p of osmFootprint.polygon) {
+      osmSumLat += p.lat;
+      osmSumLng += p.lng;
+    }
+    const osmCenterLat = osmSumLat / osmFootprint.polygon.length;
+    const osmCenterLng = osmSumLng / osmFootprint.polygon.length;
+    const dLatM = (osmCenterLat - bboxCenterLat) * 111_320;
+    const cosLat = Math.cos((bboxCenterLat * Math.PI) / 180);
+    const dLngM = (osmCenterLng - bboxCenterLng) * 111_320 * cosLat;
+    const offsetMeters = Math.sqrt(dLatM * dLatM + dLngM * dLngM);
+    if (offsetMeters > 25) {
+      // OSM and Solar disagree on which building this is — trust Solar
+      // because that's where the panels will appear.
+      osmFootprint = null;
+    }
+  }
+
   // ---- Pick the clip source: OSM polygon, Solar bbox, else geocode circle ----
   if (isUsableFootprint(osmFootprint)) {
     const buffer =
@@ -370,8 +406,12 @@ async function applyBuildingClip(
     }
   }
 
+  // Bump the Solar bbox buffer from 5 m → 12 m so the clip mask comfortably
+  // includes every panel position even when the bbox is tight on the roof.
+  // Without this the outermost AI panels can fall just outside the mask and
+  // disappear into the black void.
   const solarBox = roofFacts?.boundingBox
-    ? createBufferedBoundingBoxPolygon(roofFacts.boundingBox, 5)
+    ? createBufferedBoundingBoxPolygon(roofFacts.boundingBox, 12)
     : null;
   if (solarBox) {
     try {
@@ -425,17 +465,22 @@ interface CameraPreset {
 // Preset framings. Headings assume north = 0 (standard Cesium convention).
 // "Front" is south-facing because solar-relevant facades in the northern
 // hemisphere are the south ones — that's what the user actually cares about.
+// Camera presets the installer can flip between with the toolbar pills.
+// `roof` lands the user looking down at the roof from a steep angle — best
+// default for inspection and panel-edit work. The previous "oblique" default
+// at pitch -45 was too horizontal: tall buildings blocked the view and you
+// often saw trees instead of the roof.
 const CAMERA_PRESETS: CameraPreset[] = [
-  { id: "top",      label: "Top",        heading: 0,   pitch: -90, range: 130 },
-  { id: "front",    label: "Front",      heading: 180, pitch: -15, range: 90 },
-  { id: "side",     label: "Side",       heading: 90,  pitch: -15, range: 90 },
-  { id: "oblique",  label: "Oblique",    heading: 45,  pitch: -45, range: 110 },
-  { id: "roof",     label: "Roof angle", heading: 0,   pitch: -60, range: 90 },
+  { id: "top",      label: "Top",        heading: 0,   pitch: -90, range: 110 },
+  { id: "roof",     label: "Roof angle", heading: 0,   pitch: -70, range: 95 },
+  { id: "oblique",  label: "Oblique",    heading: 45,  pitch: -50, range: 110 },
+  { id: "front",    label: "Front",      heading: 180, pitch: -25, range: 100 },
+  { id: "side",     label: "Side",       heading: 90,  pitch: -25, range: 100 },
 ];
 
-const DEFAULT_PRESET = CAMERA_PRESETS[3]; // oblique
+const DEFAULT_PRESET = CAMERA_PRESETS[1]; // "roof" — steep angle, always shows the roof clearly
 
-export default function CesiumRoofViewInner({ coords, address }: Props) {
+export default function CesiumRoofViewInner({ coords, address, onViewerReady }: Props) {
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
   const containerRef = useRef<HTMLDivElement | null>(null);
   // We hold the viewer in a ref so React's strict-mode double-invoke doesn't
@@ -522,6 +567,11 @@ export default function CesiumRoofViewInner({ coords, address }: Props) {
           },
         });
         viewerRef.current = viewer;
+        // Hand the viewer up to the parent so installer-side overlays (panel
+        // polygons, etc.) can attach entities. Safe to fire as soon as the
+        // viewer exists — overlays handle being added before the tileset is
+        // fully streamed.
+        onViewerReady?.(viewer);
 
         // Hide the blue WGS84 globe — only the photoreal tileset should render.
         viewer.scene.globe.show = false;
@@ -690,6 +740,8 @@ export default function CesiumRoofViewInner({ coords, address }: Props) {
         }
         viewerRef.current = null;
       }
+      // Tell the parent we're gone so it drops any references / overlays.
+      onViewerReady?.(null);
     };
     // We deliberately mount-once; coords changes are handled by the next
     // effect. apiKey is stable for the page life.

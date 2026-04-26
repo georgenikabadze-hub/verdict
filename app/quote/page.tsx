@@ -5,7 +5,11 @@ import { VariantCardStack } from "@/components/homeowner/VariantCardStack";
 import { SendToInstaller } from "@/components/homeowner/SendToInstaller";
 import { SpouseShareCard } from "@/components/homeowner/SpouseShareCard";
 import { tryParseCoords } from "@/lib/parse-coords";
-import type { Intake, RoofSegment } from "@/lib/contracts";
+import type { Intake, Preference, RoofSegment } from "@/lib/contracts";
+
+function asPref(v: string | undefined, fallback: Preference = "idk"): Preference {
+  return v === "yes" || v === "no" || v === "idk" ? v : fallback;
+}
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +19,11 @@ interface SearchParams {
   ev?: string;
   heating?: string;
   goal?: string;
+  // New preference fields from the simplified intake (5-field form).
+  evPref?: string;
+  wantsBattery?: string;
+  wantsHeatPump?: string;
+  annualKwh?: string;
 }
 
 interface GeocodeOk {
@@ -115,12 +124,21 @@ export default async function QuotePage({
   const hasLiveSolarMeasurement = measuredSegments.length > 0;
   const segmentsForSizing = hasLiveSolarMeasurement ? measuredSegments : [fallbackSegment];
 
+  const evPref = asPref(params.evPref, params.ev === "true" ? "yes" : "idk");
+  const wantsBattery = asPref(params.wantsBattery);
+  const wantsHeatPump = asPref(params.wantsHeatPump);
+  const parsedAnnualKwh = params.annualKwh ? Number(params.annualKwh) : undefined;
+
   const intake: Intake = {
     address: geo?.formattedAddress ?? params.address,
     lat: geo?.lat ?? 0,
     lng: geo?.lng ?? 0,
     monthlyBillEur: Number(params.bill ?? "120"),
-    ev: params.ev === "true",
+    annualKwh: parsedAnnualKwh && parsedAnnualKwh > 0 ? parsedAnnualKwh : undefined,
+    ev: evPref === "yes" || params.ev === "true",
+    evPref,
+    wantsBattery,
+    wantsHeatPump,
     heating: (params.heating ?? "gas") as Intake["heating"],
     goal: (params.goal ?? "lower_bill") as Intake["goal"],
   };
@@ -172,7 +190,11 @@ export default async function QuotePage({
           coords={{ lat: intake.lat, lng: intake.lng }}
           intake={{
             monthlyBillEur: intake.monthlyBillEur,
+            annualKwh: intake.annualKwh,
             ev: intake.ev,
+            evPref: intake.evPref,
+            wantsBattery: intake.wantsBattery,
+            wantsHeatPump: intake.wantsHeatPump,
             heating: intake.heating,
             goal: intake.goal,
           }}

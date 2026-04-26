@@ -8,6 +8,9 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  // `bomVariants` (if present in payload) is silently ignored — the installer
+  // side composes variants from the cached market catalog when the lead is
+  // opened. Kept tolerant so old clients don't 400.
   const body = (await req.json()) as Partial<CreateLeadInput>;
   if (
     !body.id ||
@@ -39,6 +42,9 @@ export async function POST(req: NextRequest) {
         ev: body.ev ?? false,
         heating: body.heating ?? "gas",
         goal: body.goal ?? "lower_bill",
+        evPref: body.evPref,
+        wantsBattery: body.wantsBattery,
+        wantsHeatPump: body.wantsHeatPump,
         roofSegments: body.roofSegments,
       }),
     },

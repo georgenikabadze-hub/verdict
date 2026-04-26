@@ -6,7 +6,7 @@
  * the same Next.js dev server, so a process-local Map is enough.
  */
 
-import type { BoM, Goal, Heating, SizingResult, Variant } from "@/lib/contracts";
+import type { BoM, Goal, Heating, Preference, SizingResult, Variant } from "@/lib/contracts";
 import { sizeQuote } from "@/lib/sizing/calculate";
 import { deterministicBlur } from "@/lib/leads/blur";
 
@@ -30,6 +30,12 @@ export type LeadPublicPreview = {
     heating: string;
     ev: boolean;
     monthlyBillEur: number;
+    /** Three-state EV charger preference forwarded from intake (new flow). */
+    evPref?: Preference;
+    /** Three-state battery preference forwarded from intake (new flow). */
+    wantsBattery?: Preference;
+    /** Three-state heat pump preference forwarded from intake (new flow). */
+    wantsHeatPump?: Preference;
   };
 };
 
@@ -87,6 +93,12 @@ export type CreateLeadInput = {
   ev: boolean;
   heating: Heating;
   goal: Goal | "lower_bill" | "independent";
+  /** Three-state EV charger preference (new homeowner intake). */
+  evPref?: Preference;
+  /** Three-state battery preference (new homeowner intake). */
+  wantsBattery?: Preference;
+  /** Three-state heat pump preference (new homeowner intake). */
+  wantsHeatPump?: Preference;
   roofSegments?: SizingResult["roofSegments"];
   acceptedByInstallerId?: string;
   acceptedAt?: string;
@@ -209,6 +221,9 @@ export function buildLead(input: CreateLeadInput): LeadRecord {
         heating: input.heating,
         ev: input.ev,
         monthlyBillEur: input.monthlyBillEur,
+        evPref: input.evPref,
+        wantsBattery: input.wantsBattery,
+        wantsHeatPump: input.wantsHeatPump,
       },
     },
     privateDetails: {
@@ -235,74 +250,8 @@ export function buildLead(input: CreateLeadInput): LeadRecord {
   };
 }
 
-function seedLead(input: CreateLeadInput) {
-  if (!STORE.has(input.id)) STORE.set(input.id, buildLead(input));
-}
-
-const now = Date.now();
-seedLead({
-  id: "demo-conrad",
-  createdAt: new Date(now - 34 * 60 * 1000).toISOString(),
-  status: "new",
-  customerName: "Conrad Smith",
-  email: "conrad.smith@example.com",
-  phone: "+49 170 555 0141",
-  address: "Donaustrasse 23, 12043 Berlin",
-  district: "PLZ 12043 · Berlin · Neukölln",
-  lat: 52.4859,
-  lng: 13.4304,
-  monthlyBillEur: 146,
-  ev: true,
-  heating: "gas",
-  goal: "lower_bill",
-});
-
-seedLead({
-  id: "demo-mitte",
-  createdAt: new Date(now - 2.2 * 60 * 60 * 1000).toISOString(),
-  status: "accepted",
-  customerName: "Mina Keller",
-  email: "mina.keller@example.com",
-  phone: "+49 151 555 0188",
-  address: "Chausseestrasse 55, 10115 Berlin",
-  district: "PLZ 10115 · Berlin · Mitte",
-  lat: 52.5358,
-  lng: 13.3835,
-  monthlyBillEur: 118,
-  ev: false,
-  heating: "district",
-  goal: "independent",
-  acceptedByInstallerId: "berlin-solar-pro",
-  acceptedAt: new Date(now - 92 * 60 * 1000).toISOString(),
-});
-
-const seedOfferLead = buildLead({
-  id: "demo-pankow",
-  createdAt: new Date(now - 5.5 * 60 * 60 * 1000).toISOString(),
-  status: "offer_sent",
-  customerName: "Jonas Weber",
-  email: "jonas.weber@example.com",
-  phone: "+49 160 555 0162",
-  address: "Dunckerstrasse 18, 10437 Berlin",
-  district: "PLZ 10437 · Berlin · Pankow",
-  lat: 52.543,
-  lng: 13.4184,
-  monthlyBillEur: 168,
-  ev: true,
-  heating: "heat_pump",
-  goal: "independent",
-  acceptedByInstallerId: "berlin-solar-pro",
-  acceptedAt: new Date(now - 4.6 * 60 * 60 * 1000).toISOString(),
-});
-seedOfferLead.offer = {
-  sentAt: new Date(now - 3.8 * 60 * 60 * 1000).toISOString(),
-  bom: seedOfferLead.publicPreview.bomVariants[1].bom,
-  totalEur: seedOfferLead.publicPreview.bomVariants[1].bom.totalEur,
-  installerNotes: "Includes wallbox pre-wiring and final shade check.",
-};
-seedOfferLead.approvedAt = seedOfferLead.offer.sentAt;
-seedOfferLead.finalBom = bomLinesFromBom(seedOfferLead.offer.bom);
-if (!STORE.has(seedOfferLead.id)) STORE.set(seedOfferLead.id, seedOfferLead);
+// Marketplace starts empty. Leads only appear when a real homeowner submits
+// via POST /api/leads. (Demo seed leads removed 2026-04-26 morning pivot.)
 
 export function listLeads(): LeadRecord[] {
   return [...STORE.values()].sort((a, b) =>
