@@ -85,6 +85,7 @@ Reonic helps installers plan, size, and sell PV + battery + heat-pump systems. T
 | **Tavily** | (a) Runtime residential electricity tariff lookup with 4 s timeout and deterministic fallback. (b) Build-time German solar market scraping across 6 categories (panels, inverters, batteries, wallboxes, heat pumps, mounts). | `lib/api/tavily.ts`, `app/api/quote/route.ts`, `scripts/scrape-catalog.ts`, `data/fixtures/german_market_catalog.json` |
 | **Google Maps Platform + CesiumJS** | Geocoding, Places autocomplete, Solar API roof segments + per-panel placement, Photoreal 3D Tiles for the live roof view, OSM Overpass for footprint clipping. | `app/api/quote/route.ts`, `app/api/roof-facts/route.ts`, `lib/api/solar.ts`, `lib/osm/footprint.ts`, `components/homeowner/CesiumRoofViewInner.tsx` |
 | **Lovable** | Initial UI scaffold for the installer-side variant cards (`VariantCardLovable`). Generated via Lovable, then wired into the React tree by hand. Header comment marks Lovable provenance. | `components/installer/VariantCardLovable.tsx` |
+| **Gradium** ([gradium.ai](https://gradium.ai)) | Voice-AI homeowner intake. The intake form has a "Tap to record a voice note" control; the browser captures 24 kHz mono int16 PCM via an `AudioWorkletNode`, POSTs the raw bytes to `/api/voice-transcribe`, and the route streams them through Gradium's WebSocket ASR (`wss://eu.api.gradium.ai/api/speech/asr`, model `default`, `input_format: "pcm"`). The returned transcript ships with the lead so the installer sees both the audio playback and the text — useful for any context the form can't capture (tree shading, future-EV plans, accessibility constraints). | `app/api/voice-transcribe/route.ts`, `components/homeowner/VoiceMemoRecorder.tsx`, `components/installer/InstallerLeadDetail.tsx` (voice memo card) |
 
 ---
 
@@ -114,7 +115,18 @@ Reonic helps installers plan, size, and sell PV + battery + heat-pump systems. T
 - Tag-richness gate on contains-true polygons (Berlin Altbau Vorderhaus vs Hinterhaus). A geocoded address can land *inside* multiple stacked OSM polygons; tagless courtyard buildings now get a +40 score instead of +100, so a tagged sibling Vorderhaus wins on tie.
 - OSM-vs-Solar sanity: discard the OSM polygon if Solar's bbox center is more than 8 m outside it. Falls back to the Solar bbox, which is by definition where Google placed the panels.
 
-### 6. Tavily-powered market catalog
+### 6. Gradium voice intake
+
+The homeowner intake form ([components/homeowner/IntakePanel.tsx](components/homeowner/IntakePanel.tsx)) ships with an optional voice memo control. End-to-end flow:
+
+1. Homeowner taps the mic. We open `getUserMedia({ sampleRate: 24000, channelCount: 1 })` and pipe the stream into an inline `AudioWorklet` that downconverts to int16 PCM and posts buffers back to the main thread.
+2. On stop, the captured PCM is concatenated and POSTed as `application/octet-stream` to `/api/voice-transcribe`. We also wrap the same PCM in a self-contained WAV header so a plain `<audio>` element can play it back without any decoder library.
+3. The route ([app/api/voice-transcribe/route.ts](app/api/voice-transcribe/route.ts)) opens a Node-native WebSocket to `wss://eu.api.gradium.ai/api/speech/asr` with header `kyutai-api-key`, sends a `setup` frame (`model_name: "default"`, `input_format: "pcm"`), waits for `ready`, streams the PCM in 80 ms slices as base64-encoded `audio` frames, then `eos` and collects the `text` events back.
+4. The transcript + WAV data URL ride along on the lead POST → land in `LeadRecord.privateDetails.voiceNote` → render on the installer's lead detail as an inline audio player + transcript card.
+
+If Gradium is unreachable (cold-start network blip), we still ship the audio with the lead — the installer just doesn't get a transcript that time. Demo never blocks on the voice path.
+
+### 7. Tavily-powered market catalog
 
 The installer BoM is grounded in a **cached** catalog of real German solar market data. The runtime never calls Tavily — it reads the cached fixture — so the demo is bulletproof against API outages.
 
@@ -154,6 +166,7 @@ GOOGLE_MAPS_API_KEY=
 NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=
 GEMINI_API_KEY=
 TAVILY_API_KEY=
+GRADIUM_API_KEY=          # gsk_… key from gradium.ai — voice memo transcription
 ```
 
 Run:
@@ -194,7 +207,7 @@ Manual flow:
 
 > "**Verdict** — Big Berlin Hack 2026, Reonic track.
 >
-> *(homepage, address autocomplete)* Homeowner gives us four things: address, annual bill, heat pump, EV charger. That's it.
+> *(homepage, address autocomplete)* Homeowner gives us four things: address, annual bill, heat pump, EV charger. Plus an optional voice memo via **Gradium**: 'I have a chestnut tree on the south side that shades the roof from 4pm in summer' — Gradium transcribes it server-side, so the installer hears the homeowner's actual voice and reads the text in the same place.
 >
 > *(submit, see /quote confirm)* Behind the scenes our AI fetches the roof layout, sun exposure, per-panel placement, and the per-pixel solar heatmap from the **Google Solar API**. The lead lands in the installer marketplace, privacy-blurred.
 >
@@ -206,7 +219,7 @@ Manual flow:
 >
 > *(send offer)* Homeowner gets a push, opens the link, sees three priced variants for the first time.
 >
-> Three partner techs: **Tavily** for live market scraping, **Gemini** for rationale + catalog extraction, **Lovable** for UI scaffolding. Plus the full Google stack — Maps, Places, Solar API, Photorealistic 3D Tiles, Gemini."
+> Four partner techs: **Tavily** for live market scraping, **Gemini** for rationale + catalog extraction, **Lovable** for UI scaffolding, **Gradium** for voice intake transcription. Plus the full Google stack — Maps, Places, Solar API, Photorealistic 3D Tiles, Gemini."
 
 ---
 

@@ -47,6 +47,14 @@ export type LeadPrivateDetails = {
   email?: string;
   phone?: string;
   unlockedAt?: string;
+  /** Optional voice memo recorded by the homeowner during intake.
+   *  audioDataUrl is a `data:audio/webm;base64,...` URL that plays directly
+   *  in an <audio> tag. transcript is the Gradium-generated text. */
+  voiceNote?: {
+    audioDataUrl: string;
+    transcript?: string;
+    durationMs?: number;
+  };
 };
 
 export type LeadOffer = {
@@ -103,6 +111,12 @@ export type CreateLeadInput = {
   acceptedByInstallerId?: string;
   acceptedAt?: string;
   offer?: LeadOffer;
+  /** Optional homeowner voice memo + Gradium-generated transcript. */
+  voiceNote?: {
+    audioDataUrl: string;
+    transcript?: string;
+    durationMs?: number;
+  };
 };
 
 type StoreGlobal = {
@@ -234,6 +248,7 @@ export function buildLead(input: CreateLeadInput): LeadRecord {
       email: input.email,
       phone: input.phone,
       unlockedAt,
+      voiceNote: input.voiceNote,
     },
     acceptedByInstallerId: input.acceptedByInstallerId,
     acceptedAt: input.acceptedAt,

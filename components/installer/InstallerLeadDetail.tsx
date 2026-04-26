@@ -1086,6 +1086,33 @@ export function InstallerLeadDetail({ lead, onLeadChange }: Props) {
                       <span>{lead.privateDetails.phone}</span>
                     </div>
                   ) : null}
+                  {/* Homeowner voice memo recorded at intake via Gradium AI.
+                      Plays the audio in-line and shows the transcript Gradium
+                      STT generated server-side. Free-form context the form
+                      fields couldn't capture. */}
+                  {lead.privateDetails.voiceNote?.audioDataUrl ? (
+                    <div className="mt-3 rounded-md border border-[#62E6A7]/30 bg-[#62E6A7]/5 p-2.5">
+                      <div className="mb-1.5 flex items-center justify-between gap-2 text-[10px] uppercase tracking-wider text-[#62E6A7]">
+                        <span>Voice memo · Gradium AI</span>
+                        {typeof lead.privateDetails.voiceNote.durationMs === "number" ? (
+                          <span className="tabular-nums text-[#9BA3AF]">
+                            {(lead.privateDetails.voiceNote.durationMs / 1000).toFixed(1)} s
+                          </span>
+                        ) : null}
+                      </div>
+                      <audio
+                        controls
+                        src={lead.privateDetails.voiceNote.audioDataUrl}
+                        className="h-7 w-full"
+                        preload="metadata"
+                      />
+                      {lead.privateDetails.voiceNote.transcript ? (
+                        <div className="mt-2 rounded border border-[#2A3038] bg-[#0A0E1A] p-2 text-xs leading-relaxed text-[#F7F8FA]">
+                          “{lead.privateDetails.voiceNote.transcript}”
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </div>
                 <button
                   type="button"

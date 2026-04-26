@@ -46,6 +46,7 @@ export async function POST(req: NextRequest) {
         wantsBattery: body.wantsBattery,
         wantsHeatPump: body.wantsHeatPump,
         roofSegments: body.roofSegments,
+        voiceNote: body.voiceNote,
       }),
     },
     { status: 201 },

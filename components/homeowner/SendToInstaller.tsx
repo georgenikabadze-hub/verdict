@@ -33,6 +33,24 @@ export function SendToInstaller({ address, coords, intake, roofSegments }: Props
     setError(null);
     const nextLeadId = `q-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 
+    // Pull the homeowner's voice memo (recorded via Gradium-powered
+    // VoiceMemoRecorder on the intake page) out of sessionStorage if it's
+    // there, and clear it once we're about to ship — no leftovers in the
+    // tab between submissions.
+    let voiceNote: { audioDataUrl: string; transcript?: string; durationMs?: number } | undefined;
+    try {
+      const raw = window.sessionStorage.getItem("verdict.pendingVoiceMemo");
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed.audioDataUrl === "string") {
+          voiceNote = parsed;
+        }
+        window.sessionStorage.removeItem("verdict.pendingVoiceMemo");
+      }
+    } catch {
+      // ignore — sessionStorage absent or quota issues
+    }
+
     try {
       const res = await fetch("/api/leads", {
         method: "POST",
@@ -51,6 +69,7 @@ export function SendToInstaller({ address, coords, intake, roofSegments }: Props
           heating: intake.heating,
           goal: intake.goal,
           roofSegments,
+          voiceNote,
         }),
       });
 

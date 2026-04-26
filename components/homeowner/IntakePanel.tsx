@@ -4,6 +4,9 @@ import { useState } from "react";
 import type { Preference } from "@/lib/contracts";
 import { tryParseCoords } from "@/lib/parse-coords";
 import { AddressAutocomplete } from "./AddressAutocomplete";
+import { VoiceMemoRecorder, type VoiceMemo } from "./VoiceMemoRecorder";
+
+const VOICE_MEMO_STORAGE_KEY = "verdict.pendingVoiceMemo";
 
 type ConsumptionMode = "kwh" | "bill";
 
@@ -25,6 +28,7 @@ export function IntakePanel({ onLocate }: Props = {}) {
   const [wantsBattery, setWantsBattery] = useState<Preference>("idk");
   const [wantsHeatPump, setWantsHeatPump] = useState<Preference>("idk");
   const [evPref, setEvPref] = useState<Preference>("idk");
+  const [voiceMemo, setVoiceMemo] = useState<VoiceMemo | null>(null);
   const [locating, setLocating] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [resolving, setResolving] = useState(false);
@@ -140,6 +144,22 @@ export function IntakePanel({ onLocate }: Props = {}) {
     });
     if (consumptionMode === "kwh" && Number(annualKwh) > 0) {
       params.set("annualKwh", String(Number(annualKwh)));
+    }
+    // Voice memo (when present) is too big for URL params; stash it in
+    // sessionStorage so the /quote page's SendToInstaller picks it up
+    // when it POSTs to /api/leads.
+    if (voiceMemo) {
+      try {
+        sessionStorage.setItem(VOICE_MEMO_STORAGE_KEY, JSON.stringify(voiceMemo));
+      } catch {
+        // Quota exceeded or sessionStorage disabled — ship without the memo.
+      }
+    } else {
+      try {
+        sessionStorage.removeItem(VOICE_MEMO_STORAGE_KEY);
+      } catch {
+        // ignore
+      }
     }
     window.location.href = `/quote?${params.toString()}`;
   };
@@ -294,6 +314,12 @@ export function IntakePanel({ onLocate }: Props = {}) {
         onChange={setEvPref}
         groupName="ev"
       />
+
+      {/* Voice memo (Gradium AI) — optional. Lets the homeowner record any
+          context the form fields can't capture (shading from a tree, future
+          heat-pump plans, accessibility constraints) so the installer hears
+          it directly when they pick up the lead. */}
+      <VoiceMemoRecorder value={voiceMemo} onChange={setVoiceMemo} />
 
       {/* CTA */}
       <button
