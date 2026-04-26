@@ -87,7 +87,7 @@ const PANEL_DIMS = {
   PORTRAIT: { wM: 1.13, hM: 1.72 },
 } as const;
 
-const PANEL_HEIGHT_OFFSET_M = 0.15; // hover ~15 cm above the roof plane
+const PANEL_HEIGHT_OFFSET_M = 0.45; // lift clear of photoreal mesh depth noise
 const PANEL_THICKNESS_M = 0.05;
 const FLAT_SEGMENT_PITCH_DEGREES = 5;
 const ENTITY_NAME_PREFIX = "panel-";
@@ -307,6 +307,18 @@ function snapPanelsToGrid(panels: SolarPanelEntry[]): SolarPanelEntry[] {
     const ridgeN = -Math.sin(azRad);
     const cosLat = Math.cos((segLat * Math.PI) / 180);
     const safeCosLat = Math.abs(cosLat) < 1e-6 ? 1e-6 : cosLat;
+    const orientationCounts = segPanels.reduce(
+      (acc, p) => {
+        acc[p.orientation] = (acc[p.orientation] ?? 0) + 1;
+        return acc;
+      },
+      {} as Record<SolarPanelEntry["orientation"], number>,
+    );
+    const dominantOrientation =
+      (orientationCounts.PORTRAIT ?? 0) > (orientationCounts.LANDSCAPE ?? 0)
+        ? "PORTRAIT"
+        : "LANDSCAPE";
+    const rowSpacingM = PANEL_DIMS[dominantOrientation].hM + 0.05;
 
     interface GridPanel {
       panel: SolarPanelEntry;
@@ -318,14 +330,12 @@ function snapPanelsToGrid(panels: SolarPanelEntry[]): SolarPanelEntry[] {
     const rows = new Map<number, GridPanel[]>();
     for (const p of segPanels) {
       const dims = PANEL_DIMS[p.orientation] ?? PANEL_DIMS.LANDSCAPE;
-      const cellV = dims.hM + 0.05;
-
       const dE = (p.center.longitude - segLng) * 111_320 * safeCosLat;
       const dN = (p.center.latitude - segLat) * 111_320;
       const u = dE * ridgeE + dN * ridgeN;
       const v = dE * downE + dN * downN;
 
-      const vIdx = Math.round(v / cellV);
+      const vIdx = Math.round(v / rowSpacingM);
       const row = rows.get(vIdx) ?? [];
       row.push({ panel: p, dims, u, vIdx });
       rows.set(vIdx, row);
@@ -363,7 +373,7 @@ function snapPanelsToGrid(panels: SolarPanelEntry[]): SolarPanelEntry[] {
 
         run.forEach((item, runIdx) => {
           const uS = run.length === 1 ? item.u : startU + runIdx * avgPanelWidth;
-          const vS = item.vIdx * (item.dims.hM + 0.05);
+          const vS = item.vIdx * rowSpacingM;
           const dE_s = uS * ridgeE + vS * downE;
           const dN_s = uS * ridgeN + vS * downN;
           const newLat = segLat + dN_s / 111_320;
@@ -428,6 +438,8 @@ export function PanelOverlayCesium({
   const defaultAzimuthRef = useRef(defaultAzimuthDegrees);
   const defaultPitchRef = useRef(defaultPitchDegrees);
   const roofSegmentsRef = useRef(roofSegments);
+  const calibratedSegmentHeightsRef = useRef<Map<number, number> | undefined>(undefined);
+  const calibratedSignatureRef = useRef<string>("");
 
   useEffect(() => {
     onClickRef.current = onPanelClick;
@@ -459,8 +471,9 @@ export function PanelOverlayCesium({
   //
   //   • Snap input panels onto clean rows (snapPanelsToGrid above) so the
   //     visual layout reads as an actual install, not Google's scatter.
-  //   • Phase 1 (sync): render with Solar API heights. Wrong altitude but the
-  //     user sees the layout instantly.
+  //   • Phase 1 (sync): render with the last calibrated mesh heights when
+  //     available; otherwise use Solar API heights until the first sample
+  //     pass finishes.
   //   • Phase 2 (async, after 1.5 s): sample the photoreal mesh at each
   //     UNIQUE SEGMENT CENTER (not each panel — segment centers are
   //     guaranteed to be on roof per Solar API; panel centers might fall
@@ -596,8 +609,40 @@ export function PanelOverlayCesium({
       const Cesium: any = await import("cesium");
       if (cancelled || !viewer || viewer.isDestroyed?.()) return;
 
-      // Phase 1: render with Solar API heights so the user sees something fast.
-      renderPanels(Cesium);
+      const initialSeen = new Set<number>();
+      const initialSignature = panels
+        .filter((p) => {
+          if (
+            p.segmentIndex < 0 ||
+            initialSeen.has(p.segmentIndex) ||
+            !Number.isFinite(p.segmentCenterLat) ||
+            !Number.isFinite(p.segmentCenterLng)
+          ) {
+            return false;
+          }
+          initialSeen.add(p.segmentIndex);
+          return true;
+        })
+        .map(
+          (p) =>
+            `${p.segmentIndex}:${(p.segmentCenterLat as number).toFixed(6)},${(
+              p.segmentCenterLng as number
+            ).toFixed(6)}`,
+        )
+        .join("|");
+      if (
+        initialSignature &&
+        calibratedSignatureRef.current &&
+        calibratedSignatureRef.current !== initialSignature
+      ) {
+        calibratedSegmentHeightsRef.current = undefined;
+      }
+
+      // Phase 1: render immediately. After the first successful mesh sample,
+      // reuse the calibrated segment heights on later React re-renders so
+      // panels do not briefly fall back to Solar API orthometric heights
+      // below the photoreal mesh.
+      renderPanels(Cesium, calibratedSegmentHeightsRef.current);
 
       if (!visible || desiredCount <= 0 || panels.length === 0) return;
 
@@ -632,8 +677,15 @@ export function PanelOverlayCesium({
         });
       }
       if (segSamples.length === 0) return;
+      const sampleSignature = segSamples
+        .map((s) => `${s.segIndex}:${s.lat.toFixed(6)},${s.lng.toFixed(6)}`)
+        .join("|");
+      if (calibratedSignatureRef.current !== sampleSignature) {
+        calibratedSegmentHeightsRef.current = undefined;
+        calibratedSignatureRef.current = sampleSignature;
+      }
 
-      await new Promise((r) => setTimeout(r, 1500));
+      await new Promise((r) => setTimeout(r, calibratedSegmentHeightsRef.current ? 500 : 1500));
       if (cancelled || !viewer || viewer.isDestroyed?.()) return;
 
       try {
@@ -641,8 +693,20 @@ export function PanelOverlayCesium({
         const carts = segSamples.map((s) =>
           Cesium.Cartographic.fromDegrees(s.lng, s.lat),
         );
-        const result = await viewer.scene.sampleHeightMostDetailed(carts);
+        let result = await viewer.scene.sampleHeightMostDetailed(carts);
         if (cancelled || !viewer || viewer.isDestroyed?.()) return;
+        let finiteCount = result.filter((r: { height?: number } | undefined) =>
+          Number.isFinite(r?.height),
+        ).length;
+        if (finiteCount === 0 && !calibratedSegmentHeightsRef.current) {
+          await new Promise((r) => setTimeout(r, 2000));
+          if (cancelled || !viewer || viewer.isDestroyed?.()) return;
+          result = await viewer.scene.sampleHeightMostDetailed(carts);
+          if (cancelled || !viewer || viewer.isDestroyed?.()) return;
+          finiteCount = result.filter((r: { height?: number } | undefined) =>
+            Number.isFinite(r?.height),
+          ).length;
+        }
 
         // Pass 1: derive a global geoid offset from any single trusted sample.
         // We pick the LARGEST (segment with highest planeHeight is most
@@ -678,6 +742,8 @@ export function PanelOverlayCesium({
           }
         });
 
+        calibratedSegmentHeightsRef.current = segHeightMap;
+        calibratedSignatureRef.current = sampleSignature;
         renderPanels(Cesium, segHeightMap);
       } catch {
         // Sampling can throw if the scene tears down mid-await; phase-1

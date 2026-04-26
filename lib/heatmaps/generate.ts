@@ -15,6 +15,9 @@ import { getDataLayers } from "@/lib/api/solar";
 const RADIUS_METERS = 50;
 const CACHE_DIR = join(tmpdir(), "verdict_heatmaps");
 const MAX_EDGE_PX = 512;
+const WGS84_A = 6_378_137;
+const WGS84_ECC_SQUARED = 0.00669437999014;
+const UTM_SCALE_FACTOR = 0.9996;
 
 function heatColor(t: number): [number, number, number] {
   const c = Math.max(0, Math.min(1, t));
@@ -32,6 +35,128 @@ function cachePathFor(lat: number, lng: number): string {
 function metaPathFor(lat: number, lng: number): string {
   const key = `${lat.toFixed(4)}_${lng.toFixed(4)}.json`;
   return join(CACHE_DIR, key);
+}
+
+function isWgs84Bounds(bounds: HeatmapResult["bounds"]): boolean {
+  if (!bounds) return false;
+  return (
+    Math.abs(bounds.south) <= 90 &&
+    Math.abs(bounds.north) <= 90 &&
+    Math.abs(bounds.west) <= 180 &&
+    Math.abs(bounds.east) <= 180
+  );
+}
+
+function utmToLatLng(
+  easting: number,
+  northing: number,
+  zone: number,
+  northernHemisphere: boolean,
+): { lat: number; lng: number } {
+  const eccPrimeSquared = WGS84_ECC_SQUARED / (1 - WGS84_ECC_SQUARED);
+  const x = easting - 500_000;
+  let y = northing;
+  if (!northernHemisphere) y -= 10_000_000;
+
+  const longOrigin = (zone - 1) * 6 - 180 + 3;
+  const m = y / UTM_SCALE_FACTOR;
+  const mu =
+    m /
+    (WGS84_A *
+      (1 -
+        WGS84_ECC_SQUARED / 4 -
+        (3 * WGS84_ECC_SQUARED * WGS84_ECC_SQUARED) / 64 -
+        (5 * WGS84_ECC_SQUARED * WGS84_ECC_SQUARED * WGS84_ECC_SQUARED) / 256));
+
+  const e1 =
+    (1 - Math.sqrt(1 - WGS84_ECC_SQUARED)) /
+    (1 + Math.sqrt(1 - WGS84_ECC_SQUARED));
+  const j1 = (3 * e1) / 2 - (27 * e1 ** 3) / 32;
+  const j2 = (21 * e1 ** 2) / 16 - (55 * e1 ** 4) / 32;
+  const j3 = (151 * e1 ** 3) / 96;
+  const j4 = (1097 * e1 ** 4) / 512;
+  const fp =
+    mu +
+    j1 * Math.sin(2 * mu) +
+    j2 * Math.sin(4 * mu) +
+    j3 * Math.sin(6 * mu) +
+    j4 * Math.sin(8 * mu);
+
+  const sinFp = Math.sin(fp);
+  const cosFp = Math.cos(fp);
+  const tanFp = Math.tan(fp);
+  const c1 = eccPrimeSquared * cosFp ** 2;
+  const t1 = tanFp ** 2;
+  const n1 = WGS84_A / Math.sqrt(1 - WGS84_ECC_SQUARED * sinFp ** 2);
+  const r1 =
+    (WGS84_A * (1 - WGS84_ECC_SQUARED)) /
+    (1 - WGS84_ECC_SQUARED * sinFp ** 2) ** 1.5;
+  const d = x / (n1 * UTM_SCALE_FACTOR);
+
+  const latRad =
+    fp -
+    ((n1 * tanFp) / r1) *
+      (d ** 2 / 2 -
+        ((5 + 3 * t1 + 10 * c1 - 4 * c1 ** 2 - 9 * eccPrimeSquared) *
+          d ** 4) /
+          24 +
+        ((61 +
+          90 * t1 +
+          298 * c1 +
+          45 * t1 ** 2 -
+          252 * eccPrimeSquared -
+          3 * c1 ** 2) *
+          d ** 6) /
+          720);
+  const lngRad =
+    ((d -
+      ((1 + 2 * t1 + c1) * d ** 3) / 6 +
+      ((5 -
+        2 * c1 +
+        28 * t1 -
+        3 * c1 ** 2 +
+        8 * eccPrimeSquared +
+        24 * t1 ** 2) *
+        d ** 5) /
+        120) /
+      cosFp);
+
+  return {
+    lat: (latRad * 180) / Math.PI,
+    lng: longOrigin + (lngRad * 180) / Math.PI,
+  };
+}
+
+function projectedBboxToWgs84(
+  bbox: number[] | null,
+  geoKeys?: Record<string, unknown>,
+): HeatmapResult["bounds"] | undefined {
+  if (!bbox || bbox.length < 4 || !bbox.every(Number.isFinite)) return undefined;
+  const raw = { west: bbox[0], south: bbox[1], east: bbox[2], north: bbox[3] };
+  if (isWgs84Bounds(raw)) return raw;
+
+  const projectedCSType = Number(geoKeys?.ProjectedCSTypeGeoKey);
+  const isWgs84Utm =
+    Number.isInteger(projectedCSType) &&
+    (Math.floor(projectedCSType / 100) === 326 || Math.floor(projectedCSType / 100) === 327);
+  if (!isWgs84Utm) return undefined;
+
+  const zone = projectedCSType % 100;
+  const northernHemisphere = Math.floor(projectedCSType / 100) === 326;
+  const corners = [
+    utmToLatLng(bbox[0], bbox[1], zone, northernHemisphere),
+    utmToLatLng(bbox[0], bbox[3], zone, northernHemisphere),
+    utmToLatLng(bbox[2], bbox[1], zone, northernHemisphere),
+    utmToLatLng(bbox[2], bbox[3], zone, northernHemisphere),
+  ];
+  const lats = corners.map((c) => c.lat);
+  const lngs = corners.map((c) => c.lng);
+  return {
+    south: Math.min(...lats),
+    west: Math.min(...lngs),
+    north: Math.max(...lats),
+    east: Math.max(...lngs),
+  };
 }
 
 async function fileExists(p: string): Promise<boolean> {
@@ -96,10 +221,7 @@ export async function generateAnnualHeatmap(
   const bbox = typeof image.getBoundingBox === "function"
     ? (image.getBoundingBox() as number[])
     : null;
-  const bounds =
-    bbox && bbox.length >= 4 && bbox.every(Number.isFinite)
-      ? { west: bbox[0], south: bbox[1], east: bbox[2], north: bbox[3] }
-      : undefined;
+  const bounds = projectedBboxToWgs84(bbox, image.getGeoKeys?.() ?? undefined);
   const rasters = await image.readRasters();
   const band = (Array.isArray(rasters) ? rasters[0] : rasters) as
     | Float32Array | Int16Array | Uint8Array | Float64Array;

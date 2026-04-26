@@ -72,7 +72,7 @@ export function SunHeatmapCesium({ viewer, heatmap, visible }: Props) {
             Cesium.Cartographic.fromDegrees(centerLng, centerLat),
           ]);
           const h = sampled?.[0]?.height;
-          if (Number.isFinite(h)) height = h + 0.05;
+          if (Number.isFinite(h)) height = h + 2;
         }
       } catch {
         // Flat overlay can still render at the fallback height.
@@ -87,6 +87,7 @@ export function SunHeatmapCesium({ viewer, heatmap, visible }: Props) {
           rectangle: {
             coordinates: Cesium.Rectangle.fromDegrees(west, south, east, north),
             height,
+            heightReference: Cesium.HeightReference.NONE,
             material: new Cesium.ImageMaterialProperty({
               image: heatmap.imageUrl,
               transparent: true,
