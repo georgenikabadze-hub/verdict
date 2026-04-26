@@ -18,6 +18,131 @@
 
 ---
 
+## 🎯 MORNING PIVOT — Tavily-powered installer flow (decided 2026-04-26 ~03:30 Sun)
+
+**This supersedes the old "Open work" section below.** The next session should execute this plan, not the old one.
+
+### The new vision
+
+The homeowner gives 4 things. The AI does the technical pre-work (roof layout, sun, demand). The installer hits one button and **Tavily scrapes the live German solar market** — panels, inverters, batteries, wallboxes, mounts — and **Gemini structures it into a catalog**. The sizer composes 3 NPV-optimal offers from real-market prices. Every BoM line shows the source URL it came from. Reonic gets a qualified lead with full technical context attached + live-market pricing.
+
+### End-to-end flow
+
+```
+HOMEOWNER (super-simple intake — 5 fields, three-state preferences):
+  • address (Google Places autocomplete, real building only)
+  • consumption (kWh/year OR monthly bill €)
+  • need battery? (yes / no / not sure)        ← NEW
+  • need heat pump? (yes / no / not sure)
+  • need EV charger? (yes / no / not sure)
+  → submit
+  (Three-state preferences: when "not sure", installer composes a variant
+   that includes the component AND a variant without it, so the homeowner
+   can compare. "yes" = always include. "no" = always exclude.)
+  ↓
+AI PRE-FETCH (server, instant, invisible to homeowner):
+  • Google Solar API → roof layout (areas), position (azimuth/pitch), sunlight (annualSunshineHours), solarPanels[] placement
+  • derive demand profile (annual kWh, daily peak, daytime split)
+  • store lead — NO BoM yet, NO prices yet, raw inputs + AI-prefetched technical data only
+  ↓
+INSTALLER (calculation + market-research engine):
+  Lead arrives. Top of detail view shows the AI-prefetched technical card so the installer sees the AI did real work.
+  Click "Research market & build offer" → Tavily fan-out (parallel, 4s timeout each):
+    Q1 panel prices (440W modules Germany 2026) — always
+    Q2 hybrid inverter prices (5–15kW Germany) — always
+    Q3 battery storage prices (10–15kWh Germany) — if battery != "no"
+    Q4 wallbox prices (11kW Germany) — if EV != "no"
+    Q5 heat pump prices (8–12kW air-to-water Germany) — if heatPump != "no"
+    Q6 mounting system prices (tiled roof Germany) — always
+  Three-state handling: if a preference is "idk", the sizer builds BOTH a
+  variant WITH that component and one WITHOUT, so the homeowner can compare.
+  "yes" = include in all 3 variants. "no" = exclude from all 3.
+  Live progress UI: spinners → ✓ → source-URL chips appear
+  Gemini structures Tavily snippets → Catalog[] of {brand, model, kW/kWh/Wp, eurEx, source_url} via Zod
+  compose-from-market sizer → picks N panels NPV-optimally vs roof fit, matches inverter, sizes battery, totals € → 3 BoM variants
+  Each line item shows the source URL Tavily found it from. Installer may swap any component. Send Offer.
+  ↓
+HOMEOWNER:
+  Push notification → opens link → sees the 3 variants for the first time
+```
+
+### File-by-file change list
+
+**SUBTRACT — Homeowner side (~30 min)**
+- `components/homeowner/IntakePanel.tsx` — replace with 5-field form: address, consumption (kWh OR €), battery (y/n/idk), heat pump (y/n/idk), EV charger (y/n/idk). Remove `heating` and `goal`.
+- `app/quote/page.tsx` — becomes thin "Submitting → Submitted, awaiting installer" confirmation. No variants shown.
+- `components/homeowner/SendToInstaller.tsx` — fire immediately on intake submit, drop the separate CTA.
+- `components/homeowner/VariantCardStack.tsx` — unmount from /quote. Keep file in case we revive it.
+- `lib/contracts.ts` — change `Intake.ev: boolean` → `ev: "yes" | "no" | "idk"`. Add `battery: "yes" | "no" | "idk"`. Change `heating` to `wantsHeatPump: "yes" | "no" | "idk"`. Drop `goal`. Optional fields stay optional.
+
+**SEED LEAD CLEANUP**
+- `lib/leads/seed.ts` (or wherever the 3 demo seeds live) — DELETE the 3 hardcoded Donaustraße/Chausseestraße/Dunckerstraße seeds. Marketplace starts EMPTY.
+- The demo flow is: open homeowner side → enter real address → submit → switch to /installer → see exactly that lead, exactly that building. No fake data ever shown to jury.
+- If empty marketplace looks bad, optionally show a single "Submit a quote on the homeowner side to populate this view" empty state.
+
+**EXTEND — Backend pre-fetch (~30 min, mostly already there)**
+- `app/api/leads/route.ts` (POST) — already attaches `roofSegments`. Add: `solarPanels[]` from Google `buildingInsights`, demand profile, per-segment `annualSunshineHours`. Drop the `bomVariants` field from the payload — installer side will build them.
+- `app/api/roof-facts/route.ts` — also return `solarPanels[]` (slice top 200, sorted by `yearlyEnergyDcKwh` desc).
+
+**ADD — Installer side market research (~3 hours, the meat)**
+- `lib/api/tavily-research.ts` — new. 5- or 6-query parallel fan-out (skip wallbox if !EV, skip HP if !HP). 4s timeout per call. Returns `RawSearchResult[]` with `{query, snippet, url, title}`.
+- `lib/api/gemini-extract.ts` — new. Sends Tavily snippets to Gemini with a Zod schema (`{brand, model, watts?, kwh?, kw?, eurEx, currency, source_url}`). Returns `Catalog[]` per category.
+- `lib/sizing/compose-from-market.ts` — new. Inputs: catalog + roof segments + demand profile + EV/HP flags. Output: 3 `Variant`s with NPV-optimal panel count (walks N=1..panelFitMax, picks max 25-yr NPV given the live €/kWp from catalog and German €0.32 retail / €0.08 feed-in spread). Each Variant carries `sourceUrls: {panel: url, inverter: url, ...}`.
+- `app/installer/[id]/page.tsx` — new. Replaces the marketplace-only flow. Direct deep-link per lead.
+- `components/installer/InstallerLeadDetail.tsx` — rewrite:
+  - Top section: AI-prefetched technical card (roof area, segment count, dominant azimuth, median sunshine hours, derived annual kWh) — proves the AI pre-work is real.
+  - Middle: big primary CTA "Research market & build offer".
+  - During research: 5/6 spinners → ✓ → live source-URL chips populate.
+  - After research: 3 variant cards. Each BoM line shows a small source-URL chip linking to the page Tavily found it on.
+  - Bottom: Accept lead (unlocks customer details) → Send Offer.
+- `components/installer/SourceUrlChip.tsx` — new. Tiny pill: favicon + truncated host. Click opens in new tab.
+
+**KEEP**
+- `components/homeowner/CesiumRoofView*.tsx` — same building, same visual anchor. Prop interface unchanged.
+- `lib/leads/store.ts` — privacy split + blur logic unchanged.
+- `lib/sizing/calculate.ts` — kept as `composeBaselineFromKnn()` fallback. Used only if Tavily fan-out fails.
+- `lib/reonic/recommend.ts` — kept. Becomes the "Reonic baseline" second-opinion tab on the installer side (optional, low-priority).
+
+### Suggested execution order (so the demo loop is testable as early as possible)
+
+1. **(45 min)** Build `lib/api/tavily-research.ts` + `lib/api/gemini-extract.ts` end-to-end. Test in isolation: `pnpm tsx scripts/probe-tavily-research.ts` should print a structured catalog from live Tavily.
+2. **(45 min)** Build `lib/sizing/compose-from-market.ts`. Vitest with a hand-written catalog fixture so it's testable without live Tavily.
+3. **(60 min)** Rewrite `InstallerLeadDetail.tsx` with the research CTA + source-URL chips. Use a hardcoded catalog at first, then wire to step 1.
+4. **(30 min)** Strip homeowner side to 4 fields + simplify /quote page.
+5. **(30 min)** Backend: drop `bomVariants` from POST /api/leads payload, add `solarPanels[]` to roof-facts.
+6. **(30 min)** Polish: loading states, source-URL favicons, Tavily attribution footer.
+7. **(remaining time)** Loom record + form submission.
+
+### Updated 60-second Loom script
+
+> "**Verdict** — Big Berlin Hack 2026 Reonic track.
+>
+> *(homepage)* Homeowner gives us four things: address, kWh, heat pump, EV charger. That's it.
+>
+> *(submit)* Behind the scenes our AI fetches the roof layout, sun exposure, and per-panel placement from Google Solar API. Lead lands in the installer marketplace privacy-blurred.
+>
+> *(open /installer)* Berlin Solar Pro picks up the lead. Top of the screen shows the AI-prefetched technical brief — they didn't have to do the research themselves.
+>
+> *(click "Research market & build offer")* Now the magic — **Tavily** scrapes the German solar market live: panels, inverters, batteries, wallboxes, mounts. **Gemini** structures the snippets into a catalog. Six queries in parallel, four seconds each.
+>
+> *(catalog populates)* Look at this — every component links back to the actual source URL Tavily found it on. No fake data, no stale fixtures. Live German market right now.
+>
+> *(3 variants appear)* Our sizer picks the panel count that maximizes 25-year NPV against this specific roof and Berlin's €0.32 retail / €0.08 feed-in tariff. Three options: Best Margin, Best Close Rate, Best LTV.
+>
+> *(click Send Offer)* Homeowner gets a push, opens the link, sees their offers for the first time — backed by live market data.
+>
+> Three partner techs: **Tavily** for live market scraping, **Gemini** for structured extraction and rationale, **Lovable** for the variant card UI."
+
+### Hard rules during the rebuild
+
+- Do NOT delete `lib/sizing/calculate.ts` — keep it as the fallback path (compose-from-knn).
+- Do NOT change `lib/contracts.ts` field names — only ADD optional fields (`sourceUrls`, `aiPrefetched`).
+- Do NOT skip the 4s Tavily timeout — better to fall back to fixture catalog than hang the demo.
+- Tests for `compose-from-market.ts` must use a fixture catalog (no live Tavily in CI).
+- Source URLs must be REAL Tavily-returned URLs. Never synthesize.
+
+---
+
 ## ✅ Shipped this session (working)
 
 **Sprint 5+6 (commit `762c79f`)**
@@ -175,10 +300,11 @@ curl -s "http://localhost:3000/api/roof-facts?lat=52.5358&lng=13.3835" | jq '.to
 ## ➡ First moves for the next session
 
 1. `cat STATUS.md` (this file)
-2. `cat AGENTS.md` and `cat README.md`
-3. `tail -300 /tmp/verdict_research.log` — codex's full research output (papers, APIs, agent prompts)
-4. **Pick attack order**: items 1 + 4 + 6 + 2 (Lovable artifact → 30-min sunshine fix → Cesium panel overlay → Loom record)
-5. Don't fight the Vercel `TAVILY_API_KEY` runtime issue — Loom on localhost works fine
+2. **Read the "🎯 MORNING PIVOT" section at the top.** Old "Open work" / "Codex research findings" sections are deprecated — they describe a flow we are no longer building.
+3. `cat AGENTS.md` and `cat README.md` for repo conventions (still current).
+4. **Execute the new plan in the suggested order** (Tavily research lib → Gemini extract → compose-from-market sizer → installer UI rewrite → simplify homeowner side → polish → Loom).
+5. Don't fight the Vercel `TAVILY_API_KEY` runtime issue — record Loom on localhost.
+6. Lovable card scaffold (`components/homeowner/VariantCardLovable.tsx`) is still required for the 3-partner-tech rule — but in the new flow, mount it on the **installer-side** variant cards instead of homeowner side. The header comment `// Generated initial scaffold via Lovable (Big Berlin Hack 2026)` is what counts for jury review.
 
 **Demo loop verified working end-to-end as of 03:05 Sun**: address → quote → send → installer accept → offer → homeowner toast. Don't break it.
 
