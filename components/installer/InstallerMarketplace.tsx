@@ -56,10 +56,12 @@ function staticMapUrl(lead: LeadRecord, apiKey?: string, useExact = false): stri
 export function InstallerMarketplace({ initialLeads, mapsApiKey }: Props) {
   const [leads, setLeads] = useState(initialLeads);
   const [selectedId, setSelectedId] = useState(initialLeads[0]?.id ?? null);
-  const [exactView, setExactView] = useState(false);
-  // Restore the debug toggle across page reloads so it doesn't disrupt testing.
+  // Default to exact view: testing needs the real building visible at all times.
+  // The privacy-blurred mode is still selectable via the toggle for the demo pitch.
+  const [exactView, setExactView] = useState(true);
   useEffect(() => {
-    if (window.localStorage.getItem(EXACT_VIEW_STORAGE_KEY) === "1") setExactView(true);
+    const stored = window.localStorage.getItem(EXACT_VIEW_STORAGE_KEY);
+    if (stored === "0") setExactView(false);
   }, []);
   const toggleExactView = () => {
     setExactView((prev) => {
