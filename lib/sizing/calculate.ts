@@ -60,6 +60,25 @@ const DEFAULT_HEATED_AREA_M2 = 120;
 /** Annual yield assumption (kWh per kWp installed) — Germany typical. */
 const ANNUAL_YIELD_KWH_PER_KWP = 950;
 
+/** Annual kWh produced per panel in DE (used for demand-driven sizing). */
+const KWH_PER_PANEL_PER_YEAR_DE = 410;
+
+/** Footprint per panel in m² (frame + landscape mounting). */
+const PANEL_FOOTPRINT_M2 = 1.7;
+
+/** Roof packing factor — accounts for setbacks, vents, anti-shading spacing. */
+const ROOF_PACKING_FACTOR = 0.7;
+
+/** Min usable segment area (m²). Anything smaller is not worth a string. */
+const MIN_SEGMENT_AREA_M2 = 10;
+
+/** Demand oversize factor — fill the roof when uncertain (Reonic spec). */
+const DEMAND_OVERSIZE = 1.1;
+
+/** MPPT string sizing limits. */
+const MIN_PANELS_PER_STRING = 4;
+const MAX_PANELS_PER_STRING = 25;
+
 /** Feed-in tariff (€/kWh). Surplus exported to the grid. */
 const FEED_IN_EUR_PER_KWH = 0.08;
 
@@ -72,6 +91,223 @@ const HP_DEMAND_THRESHOLD_KWH = 8000;
 
 const round0 = (n: number): number => Math.round(n);
 const round1 = (n: number): number => Math.round(n * 10) / 10;
+
+// ---------------------------------------------------------------------------
+// Roof-aware allocation types & helpers
+// ---------------------------------------------------------------------------
+
+export type AzimuthBucket = "E" | "SE" | "S" | "SW" | "W" | "N" | "flat";
+
+export interface SegmentAllocation {
+  /** Segment index in the input array. */
+  index: number;
+  azimuthDegrees: number;
+  pitchDegrees: number;
+  areaMeters2: number;
+  panelsAllocated: number;
+  /** 1, 2, 3 ... (only meaningful when panelsAllocated > 0). */
+  stringId: number;
+  azimuthBucket: AzimuthBucket;
+  /** Estimated annual yield from this allocation (kWh). */
+  yieldKwhPerYear: number;
+  status: "used" | "skipped";
+  skipReason?: "too-small" | "north-facing" | "no-panels-left";
+}
+
+/** Bucket compass azimuth (0=N, 90=E, 180=S, 270=W). Pitch < 5° => flat. */
+function bucketAzimuth(azimuthDegrees: number, pitchDegrees: number): AzimuthBucket {
+  if (pitchDegrees < 5) return "flat";
+  const a = ((azimuthDegrees % 360) + 360) % 360;
+  if (a >= 157.5 && a < 202.5) return "S";
+  if (a >= 112.5 && a < 157.5) return "SE";
+  if (a >= 202.5 && a < 247.5) return "SW";
+  if (a >= 67.5 && a < 112.5) return "E";
+  if (a >= 247.5 && a < 292.5) return "W";
+  return "N";
+}
+
+const AZIMUTH_FACTOR: Record<AzimuthBucket, number> = {
+  S: 1.0,
+  SE: 0.94,
+  SW: 0.94,
+  E: 0.84,
+  W: 0.84,
+  flat: 0.92,
+  N: 0.55,
+};
+
+function pitchFactor(pitch: number): number {
+  if (pitch < 5) return 0.92;
+  if (pitch > 50) return 0.85;
+  if (pitch >= 20 && pitch <= 40) return 1.0;
+  // Linear-ish in the in-between bands; keep it simple.
+  return 0.95;
+}
+
+function isUsableSegment(s: RoofSegment): boolean {
+  if (s.areaMeters2 <= MIN_SEGMENT_AREA_M2) return false;
+  // Flat roofs (pitch < 5°) are azimuth-agnostic — tilted mounting frames
+  // re-orient panels regardless of the underlying roof direction.
+  if (s.pitchDegrees < 5) return true;
+  // Pitched roofs: skip pure north — azimuth must be in [90, 270].
+  const a = ((s.azimuthDegrees % 360) + 360) % 360;
+  return a >= 90 && a <= 270;
+}
+
+function segmentCapacity(s: RoofSegment): number {
+  return Math.floor((s.areaMeters2 / PANEL_FOOTPRINT_M2) * ROOF_PACKING_FACTOR);
+}
+
+/** Yield from a hypothetical allocation, used both for ranking and reporting. */
+function estimateYield(
+  panels: number,
+  bucket: AzimuthBucket,
+  pitch: number,
+): number {
+  return panels * KWH_PER_PANEL_PER_YEAR_DE * AZIMUTH_FACTOR[bucket] * pitchFactor(pitch);
+}
+
+/** Roof-fit cap: max panels that physically fit on usable segments. */
+function calcPanelFitMax(segments: RoofSegment[]): number {
+  return segments
+    .filter(isUsableSegment)
+    .reduce((sum, s) => sum + segmentCapacity(s), 0);
+}
+
+/**
+ * Greedy per-segment allocator. Ranks usable segments by yield-per-panel
+ * (S+steep first, then flat, E/W, N), assigns panels until exhausted,
+ * groups consecutive same-azimuth-bucket segments into shared MPPT strings
+ * (clamped to [MIN, MAX]_PANELS_PER_STRING).
+ */
+export function allocatePanelsToSegments(
+  segments: RoofSegment[],
+  totalPanelCount: number,
+): SegmentAllocation[] {
+  // Build base allocation rows, preserving original index.
+  const rows: SegmentAllocation[] = segments.map((s, index) => {
+    const bucket = bucketAzimuth(s.azimuthDegrees, s.pitchDegrees);
+    const base: SegmentAllocation = {
+      index,
+      azimuthDegrees: s.azimuthDegrees,
+      pitchDegrees: s.pitchDegrees,
+      areaMeters2: s.areaMeters2,
+      panelsAllocated: 0,
+      stringId: 0,
+      azimuthBucket: bucket,
+      yieldKwhPerYear: 0,
+      status: "skipped",
+    };
+    if (s.areaMeters2 <= MIN_SEGMENT_AREA_M2) {
+      base.skipReason = "too-small";
+      return base;
+    }
+    if (!isUsableSegment(s)) {
+      base.skipReason = "north-facing";
+      return base;
+    }
+    return base;
+  });
+
+  let remaining = Math.max(0, Math.floor(totalPanelCount));
+
+  // Rank usable rows by yield-per-panel (deterministic via index tiebreak).
+  const usableOrder = rows
+    .map((r, i) => ({ r, i }))
+    .filter(({ r }) => r.skipReason === undefined)
+    .sort((a, b) => {
+      const ya = estimateYield(1, a.r.azimuthBucket, a.r.pitchDegrees);
+      const yb = estimateYield(1, b.r.azimuthBucket, b.r.pitchDegrees);
+      if (yb !== ya) return yb - ya;
+      return a.i - b.i;
+    });
+
+  for (const { r } of usableOrder) {
+    if (remaining <= 0) {
+      r.skipReason = "no-panels-left";
+      continue;
+    }
+    const cap = segmentCapacity(segments[r.index]);
+    const take = Math.min(cap, remaining);
+    if (take <= 0) {
+      r.skipReason = "no-panels-left";
+      continue;
+    }
+    r.panelsAllocated = take;
+    r.status = "used";
+    r.yieldKwhPerYear = round0(estimateYield(take, r.azimuthBucket, r.pitchDegrees));
+    remaining -= take;
+  }
+
+  // Assign string IDs in original order. Group consecutive same-bucket used
+  // segments into the same string while staying within MIN/MAX panel limits.
+  let nextStringId = 0;
+  let currentBucket: AzimuthBucket | null = null;
+  let currentStringPanels = 0;
+
+  for (const r of rows) {
+    if (r.status !== "used") {
+      r.stringId = 0;
+      currentBucket = null;
+      currentStringPanels = 0;
+      continue;
+    }
+    const wouldOverflow =
+      currentBucket !== r.azimuthBucket ||
+      currentStringPanels + r.panelsAllocated > MAX_PANELS_PER_STRING;
+    if (currentBucket === null || wouldOverflow) {
+      nextStringId += 1;
+      currentBucket = r.azimuthBucket;
+      currentStringPanels = 0;
+    }
+    r.stringId = nextStringId;
+    currentStringPanels += r.panelsAllocated;
+  }
+
+  // Merge undersized trailing strings into the previous one when possible.
+  // Walk the used-only sequence; if a string is below MIN_PANELS_PER_STRING
+  // and merging into the previous string keeps it ≤ MAX, fold it in.
+  const usedRows = rows.filter((r) => r.status === "used");
+  if (usedRows.length > 1) {
+    const stringPanelTotals = new Map<number, number>();
+    for (const r of usedRows) {
+      stringPanelTotals.set(r.stringId, (stringPanelTotals.get(r.stringId) ?? 0) + r.panelsAllocated);
+    }
+    for (let i = 1; i < usedRows.length; i += 1) {
+      const cur = usedRows[i];
+      const prev = usedRows[i - 1];
+      if (cur.stringId === prev.stringId) continue;
+      const curTotal = stringPanelTotals.get(cur.stringId) ?? 0;
+      const prevTotal = stringPanelTotals.get(prev.stringId) ?? 0;
+      if (
+        curTotal < MIN_PANELS_PER_STRING &&
+        prevTotal + curTotal <= MAX_PANELS_PER_STRING
+      ) {
+        const oldId = cur.stringId;
+        // Reassign all rows currently on oldId to prev.stringId.
+        for (const r of usedRows) {
+          if (r.stringId === oldId) r.stringId = prev.stringId;
+        }
+        stringPanelTotals.set(prev.stringId, prevTotal + curTotal);
+        stringPanelTotals.delete(oldId);
+      }
+    }
+    // Compact string IDs to 1..N in first-encounter order.
+    const remap = new Map<number, number>();
+    let n = 0;
+    for (const r of usedRows) {
+      if (!remap.has(r.stringId)) {
+        n += 1;
+        remap.set(r.stringId, n);
+      }
+    }
+    for (const r of rows) {
+      if (r.status === "used") r.stringId = remap.get(r.stringId) ?? r.stringId;
+    }
+  }
+
+  return rows;
+}
 
 // ---------------------------------------------------------------------------
 // Core sizing
@@ -439,18 +675,38 @@ function validateRules(args: {
 // Public entry point
 // ---------------------------------------------------------------------------
 
+/**
+ * Extended SizingResult with roof-aware fields. Kept as a structural
+ * superset of `SizingResult` so existing call sites keep working — extra
+ * fields are optional and non-breaking.
+ */
+export type SizingResultWithAllocations = SizingResult & {
+  /** Per-segment panel layout (only populated when segments drive sizing). */
+  segmentAllocations?: SegmentAllocation[];
+  /** Distinct MPPT string count derived from segmentAllocations. */
+  mpptStringCount?: number;
+};
+
 export function sizeQuote(
   intake: Intake,
   roofSegments: RoofSegment[],
   eurPerKwhOverride?: number,
-): SizingResult {
+): SizingResultWithAllocations {
   const annualKwhRaw = deriveAnnualKwh(intake, eurPerKwhOverride);
   const annualKwh = round0(annualKwhRaw);
   const dailyKwh = annualKwhRaw / 365;
 
   const usableRoofAreaM2 = calcUsableRoofArea(roofSegments);
 
-  const panelCount = calcPanelCount(annualKwhRaw);
+  // Roof-aware sizing: cap demand-driven panel count by what physically
+  // fits on usable segments. Falls back to the bill-derived formula when
+  // no usable segments are present.
+  const panelFitMax = calcPanelFitMax(roofSegments);
+  const panelDemand = Math.ceil(annualKwhRaw / KWH_PER_PANEL_PER_YEAR_DE);
+  const roofAware = panelFitMax > 0;
+  const panelCount = roofAware
+    ? Math.max(1, Math.min(panelFitMax, Math.round(panelDemand * DEMAND_OVERSIZE)))
+    : calcPanelCount(annualKwhRaw);
   const systemKwpRaw = panelCount * PANEL_KW;
   const systemKwp = round1(systemKwpRaw);
 
@@ -496,7 +752,7 @@ export function sizeQuote(
     buildVariant({ cfg: VARIANT_CONFIGS[2], ...variantInputBase }),
   ];
 
-  const result: SizingResult = {
+  const result: SizingResultWithAllocations = {
     annualKwh,
     dailyKwh: round1(dailyKwh),
     usableRoofAreaM2: round1(usableRoofAreaM2),
@@ -508,6 +764,15 @@ export function sizeQuote(
     rules,
     variants,
   };
+
+  if (roofAware) {
+    const allocations = allocatePanelsToSegments(roofSegments, panelCount);
+    result.segmentAllocations = allocations;
+    const stringIds = new Set(
+      allocations.filter((a) => a.status === "used").map((a) => a.stringId),
+    );
+    result.mpptStringCount = stringIds.size;
+  }
 
   if (shouldOfferHp || intake.heating === "heat_pump") {
     // Report a sized heat pump in the top-level summary whenever the household
@@ -550,7 +815,7 @@ export async function sizeQuoteWithRationale(
   intake: Intake,
   roofSegments: RoofSegment[],
   eurPerKwhOverride?: number,
-): Promise<SizingResult> {
+): Promise<SizingResultWithAllocations> {
   const base = sizeQuote(intake, roofSegments, eurPerKwhOverride);
 
   const enriched = await Promise.all(

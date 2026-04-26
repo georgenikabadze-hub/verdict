@@ -1,15 +1,27 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Check, Lock, Mail, MapPin, Phone, RefreshCw, Send } from "lucide-react";
-import type { BoM } from "@/lib/contracts";
+import type { BoM, Intake, RoofSegment, Variant } from "@/lib/contracts";
 import type { LeadRecord } from "@/lib/leads/store";
+import { sizeQuote, type SizingResultWithAllocations } from "@/lib/sizing/calculate";
 import { CesiumRoofView } from "@/components/homeowner/CesiumRoofView";
 import { PanelLayoutPreview } from "@/components/installer/PanelLayoutPreview";
+import { SegmentBreakdown } from "@/components/installer/SegmentBreakdown";
 
 interface Props {
   lead: LeadRecord;
   onLeadChange: (lead: LeadRecord) => void;
+}
+
+interface RoofFactsResponse {
+  segments?: Array<{
+    pitchDegrees?: number;
+    azimuthDegrees?: number;
+    areaMeters2?: number;
+    annualSunshineHours?: number;
+  }>;
+  totalAreaM2?: number;
 }
 
 function formatTime(iso?: string): string {
@@ -55,16 +67,106 @@ function bomLines(bom: BoM): { label: string; value: string }[] {
   return lines;
 }
 
+function median(nums: number[]): number {
+  if (nums.length === 0) return 0;
+  const sorted = [...nums].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+}
+
+function intakeFromLead(lead: LeadRecord): Intake {
+  const prefs = lead.publicPreview.preferences;
+  const goal: Intake["goal"] = prefs.goal === "independent" ? "independence" : "lower_bill";
+  return {
+    address: lead.privateDetails.address,
+    lat: lead.privateDetails.lat,
+    lng: lead.privateDetails.lng,
+    monthlyBillEur: prefs.monthlyBillEur,
+    ev: prefs.ev,
+    heating: prefs.heating as Intake["heating"],
+    goal,
+  };
+}
+
 export function InstallerLeadDetail({ lead, onLeadChange }: Props) {
+  const [liveSizing, setLiveSizing] = useState<SizingResultWithAllocations | null>(null);
+  const [liveTotalAreaM2, setLiveTotalAreaM2] = useState<number | null>(null);
+  const [livePitchDeg, setLivePitchDeg] = useState<number | null>(null);
+  const [liveLoading, setLiveLoading] = useState(true);
+  const [liveError, setLiveError] = useState(false);
+
+  const variants: Variant[] = liveSizing?.variants
+    ? [...liveSizing.variants]
+    : lead.publicPreview.bomVariants;
+
   const [selectedVariantId, setSelectedVariantId] = useState(lead.publicPreview.bomVariants[1]?.id);
   const [busy, setBusy] = useState<"accept" | "offer" | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const unlocked = lead.status !== "new";
+
+  useEffect(() => {
+    let cancelled = false;
+    setLiveLoading(true);
+    setLiveError(false);
+
+    const { lat, lng } = lead.privateDetails;
+    fetch(`/api/roof-facts?lat=${lat}&lng=${lng}`, { cache: "no-store" })
+      .then((res) => {
+        if (!res.ok) throw new Error("roof-facts failed");
+        return res.json() as Promise<RoofFactsResponse>;
+      })
+      .then((data) => {
+        if (cancelled) return;
+        const rawSegments = Array.isArray(data.segments) ? data.segments : [];
+        if (rawSegments.length === 0) {
+          setLiveError(true);
+          setLiveLoading(false);
+          return;
+        }
+        const liveSegments: RoofSegment[] = rawSegments.map((s) => ({
+          pitchDegrees: s.pitchDegrees ?? 0,
+          azimuthDegrees: s.azimuthDegrees ?? 180,
+          areaMeters2: s.areaMeters2 ?? 0,
+          annualSunshineHours: s.annualSunshineHours ?? 1000,
+        }));
+        const sizing = sizeQuote(intakeFromLead(lead), liveSegments);
+        setLiveSizing(sizing);
+        setLiveTotalAreaM2(typeof data.totalAreaM2 === "number" ? data.totalAreaM2 : null);
+        setLivePitchDeg(median(liveSegments.map((s) => s.pitchDegrees)));
+        setLiveLoading(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setLiveError(true);
+        setLiveLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [lead]);
+
+  // Reconcile selected variant when variants list changes (e.g. live data swaps it).
+  useEffect(() => {
+    if (!variants.find((v) => v.id === selectedVariantId)) {
+      setSelectedVariantId(variants[1]?.id ?? variants[0]?.id);
+    }
+  }, [variants, selectedVariantId]);
+
   const selectedVariant =
-    lead.publicPreview.bomVariants.find((variant) => variant.id === selectedVariantId) ??
-    lead.publicPreview.bomVariants[1] ??
-    lead.publicPreview.bomVariants[0];
+    variants.find((variant) => variant.id === selectedVariantId) ??
+    variants[1] ??
+    variants[0];
   const lines = useMemo(() => bomLines(selectedVariant.bom), [selectedVariant.bom]);
+
+  const roofAreaValue =
+    liveTotalAreaM2 ?? lead.publicPreview.roofFacts.totalAreaM2 ?? 0;
+  const pitchValue = livePitchDeg
+    ? Math.round(livePitchDeg)
+    : lead.publicPreview.roofFacts.pitchDeg ?? "—";
+  const panelCount = liveSizing?.panelCount ?? lead.publicPreview.sizing.panelCount;
+  const systemKwp = liveSizing?.systemKwp ?? lead.publicPreview.sizing.systemKwp;
+  const segmentsForLayout = liveSizing?.roofSegments ?? lead.publicPreview.sizing.roofSegments;
 
   const acceptLead = async () => {
     setBusy("accept");
@@ -129,12 +231,30 @@ export function InstallerLeadDetail({ lead, onLeadChange }: Props) {
 
       <section className="grid gap-5 overflow-y-auto p-5 xl:grid-cols-[1fr_380px] xl:p-6">
         <div className="flex flex-col gap-5">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-[#9BA3AF]">
+              Roof intelligence
+            </h2>
+            <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-[#5B6470]">
+              {liveLoading ? (
+                <>
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#3DAEFF]" />
+                  Recomputing live
+                </>
+              ) : liveError ? (
+                <span className="text-[#5B6470]">Using cached sizing</span>
+              ) : (
+                <span className="text-[#62E6A7]">Live Solar API</span>
+              )}
+            </div>
+          </div>
+
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
             {[
-              { label: "Roof area", value: `${lead.publicPreview.roofFacts.totalAreaM2 ?? 0} m²` },
-              { label: "Pitch", value: `${lead.publicPreview.roofFacts.pitchDeg ?? "—"}°` },
-              { label: "Panels", value: `${lead.publicPreview.sizing.panelCount}` },
-              { label: "System", value: `${lead.publicPreview.sizing.systemKwp} kWp` },
+              { label: "Roof area", value: `${roofAreaValue} m²` },
+              { label: "Pitch", value: `${pitchValue}°` },
+              { label: "Panels", value: `${panelCount}` },
+              { label: "System", value: `${systemKwp} kWp` },
             ].map((kpi) => (
               <div key={kpi.label} className="rounded-lg border border-[#2A3038] bg-[#12161C] p-3">
                 <div className="text-[10px] uppercase tracking-wider text-[#5B6470]">{kpi.label}</div>
@@ -153,7 +273,7 @@ export function InstallerLeadDetail({ lead, onLeadChange }: Props) {
               </span>
             </div>
             <div className="grid gap-2 md:grid-cols-3">
-              {lead.publicPreview.bomVariants.map((variant) => (
+              {variants.map((variant) => (
                 <button
                   key={variant.id}
                   type="button"
@@ -186,7 +306,7 @@ export function InstallerLeadDetail({ lead, onLeadChange }: Props) {
           </section>
 
           <PanelLayoutPreview
-            segments={lead.publicPreview.sizing.roofSegments}
+            segments={segmentsForLayout}
             panelCount={selectedVariant.bom.panels.count}
           />
         </div>
@@ -263,6 +383,14 @@ export function InstallerLeadDetail({ lead, onLeadChange }: Props) {
 
             {notice ? <div className="mt-3 text-xs text-[#9BA3AF]">{notice}</div> : null}
           </section>
+          {liveSizing && (
+            <SegmentBreakdown
+              rows={liveSizing.segmentAllocations ?? []}
+              totalPanels={liveSizing.panelCount}
+              totalSystemKwp={liveSizing.systemKwp}
+              mpptStringCount={liveSizing.mpptStringCount ?? 1}
+            />
+          )}
         </aside>
       </section>
     </div>
