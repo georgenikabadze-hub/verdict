@@ -29,6 +29,7 @@ import { SegmentBreakdown } from "@/components/installer/SegmentBreakdown";
 import { SourceUrlChip } from "@/components/installer/SourceUrlChip";
 import {
   PanelOverlayCesium,
+  panelKey,
   type SolarPanelEntry,
 } from "@/components/installer/PanelOverlayCesium";
 
@@ -223,9 +224,27 @@ export function InstallerLeadDetail({ lead, onLeadChange }: Props) {
   const [showPanels, setShowPanels] = useState(true);
   const [editMode, setEditMode] = useState(false);
 
-  const baseVariants: Variant[] = liveSizing?.variants
-    ? [...liveSizing.variants]
-    : lead.publicPreview.bomVariants;
+  // Installer review is anchored to the lead the homeowner actually sent.
+  // Live roof facts may recompute a larger demand-cap system after creation
+  // (notably HP+EV), but the visible overlay and BoM must agree with the
+  // stored customer preview count.
+  const leadPanelCount = lead.publicPreview.sizing.panelCount;
+  const baseVariants: Variant[] = useMemo(
+    () =>
+      (liveSizing?.variants ? [...liveSizing.variants] : lead.publicPreview.bomVariants).map(
+        (variant) => ({
+          ...variant,
+          bom: {
+            ...variant.bom,
+            panels: {
+              ...variant.bom.panels,
+              count: leadPanelCount,
+            },
+          },
+        }),
+      ),
+    [liveSizing?.variants, lead.publicPreview.bomVariants, leadPanelCount],
+  );
 
   const [selectedVariantId, setSelectedVariantId] = useState(lead.publicPreview.bomVariants[1]?.id);
   const [busy, setBusy] = useState<"accept" | "offer" | null>(null);
@@ -369,23 +388,50 @@ export function InstallerLeadDetail({ lead, onLeadChange }: Props) {
     });
   }, []);
 
-  // Pro-rata recompute. Once the installer kills a few panels (or adds some
-  // manual ones for under-utilised roof areas), scale every variant's monthly
-  // savings by the active/total ratio and stretch payback inversely. We do
-  // this BEFORE the variant cards render so the live numbers match what the
-  // overlay shows. systemKwp also tracks active count.
-  const sizerPanelCount = liveSizing?.panelCount ?? lead.publicPreview.sizing.panelCount;
+  // Panel target used by the overlay and BoM display. Keep this tied to the
+  // stored lead preview so a live re-size cannot silently turn a 13-panel
+  // homeowner quote into a 30-panel installer overlay.
+  const sizerPanelCount = leadPanelCount;
 
-  // Top-N AI panels by yield, then count how many fall in segments the
-  // installer disabled in the SegmentBreakdown. We need this against the
-  // SAME slice the overlay uses (otherwise the BoM scale and the rendered
-  // panels disagree).
+  const highestYieldSegmentIndex = useMemo<number | null>(() => {
+    const totals = new Map<number, { total: number; count: number }>();
+    for (const p of solarPanels) {
+      if (p.segmentIndex < 0) continue;
+      const entry = totals.get(p.segmentIndex) ?? { total: 0, count: 0 };
+      entry.total += p.yearlyEnergyDcKwh ?? 0;
+      entry.count += 1;
+      totals.set(p.segmentIndex, entry);
+    }
+    let bestIndex: number | null = null;
+    let bestTotal = -Infinity;
+    let bestAverage = -Infinity;
+    for (const [segmentIndex, entry] of totals) {
+      const average = entry.count > 0 ? entry.total / entry.count : 0;
+      if (
+        entry.total > bestTotal ||
+        (entry.total === bestTotal && average > bestAverage) ||
+        (entry.total === bestTotal && average === bestAverage && segmentIndex < (bestIndex ?? Infinity))
+      ) {
+        bestIndex = segmentIndex;
+        bestTotal = entry.total;
+        bestAverage = average;
+      }
+    }
+    return bestIndex;
+  }, [solarPanels]);
+
+  // Top-N AI panels by yield on one roof face. This trades a few theoretical
+  // kWh for a clean rectangular demo layout and avoids mixing azimuths.
   const aiTopSlice = useMemo<SolarPanelEntry[]>(() => {
-    const sortedAi = [...solarPanels].sort(
+    const eligible =
+      highestYieldSegmentIndex === null
+        ? solarPanels
+        : solarPanels.filter((p) => p.segmentIndex === highestYieldSegmentIndex);
+    const sortedAi = [...eligible].sort(
       (a, b) => (b.yearlyEnergyDcKwh ?? 0) - (a.yearlyEnergyDcKwh ?? 0),
     );
     return sortedAi.slice(0, sizerPanelCount);
-  }, [solarPanels, sizerPanelCount]);
+  }, [solarPanels, highestYieldSegmentIndex, sizerPanelCount]);
   const aiDisabledBySegmentCount = useMemo(
     () =>
       aiTopSlice.filter((p) => disabledSegmentIndexes.has(p.segmentIndex)).length,
@@ -397,30 +443,49 @@ export function InstallerLeadDetail({ lead, onLeadChange }: Props) {
   // (b) its roof segment was toggled off in the SegmentBreakdown sidebar.
   const aiActiveCount = Math.max(
     0,
-    sizerPanelCount -
+    aiTopSlice.length -
       Array.from(removedPanelKeys).filter((k) => !k.startsWith("manual-")).length -
       aiDisabledBySegmentCount,
   );
   const manualActiveCount = manuallyAddedPanels.filter(
     (_p, idx) => !removedPanelKeys.has(`manual-${idx}`),
   ).length;
-  const activePanelCount = aiActiveCount + manualActiveCount;
-  const panelScale = sizerPanelCount > 0 ? activePanelCount / sizerPanelCount : 1;
+  const activePanelCount =
+    solarPanels.length === 0 ? sizerPanelCount + manualActiveCount : aiActiveCount + manualActiveCount;
+  const totalSlicedYieldKwh = useMemo(
+    () => aiTopSlice.reduce((sum, p) => sum + Math.max(0, p.yearlyEnergyDcKwh ?? 0), 0),
+    [aiTopSlice],
+  );
+  const activeYieldKwh = useMemo(
+    () =>
+      aiTopSlice.reduce((sum, p, idx) => {
+        if (disabledSegmentIndexes.has(p.segmentIndex)) return sum;
+        const key = panelKey(idx, p.center.latitude, p.center.longitude);
+        if (removedPanelKeys.has(key)) return sum;
+        return sum + Math.max(0, p.yearlyEnergyDcKwh ?? 0);
+      }, 0),
+    [aiTopSlice, disabledSegmentIndexes, removedPanelKeys],
+  );
+  const yieldScale = totalSlicedYieldKwh > 0 ? activeYieldKwh / totalSlicedYieldKwh : 1;
   const variants: Variant[] = useMemo(() => {
-    if (panelScale === 1) return baseVariants;
     return baseVariants.map((v) => ({
       ...v,
-      monthlySavingsEur: Math.round(v.monthlySavingsEur * panelScale),
-      // Payback scales inversely: fewer kWh produced → longer payback. Guard
-      // against div-by-zero when the installer removes every panel — in that
-      // case we leave the original payback in place (the variant card is
-      // already useless at 0 panels).
+      bom: {
+        ...v.bom,
+        panels: {
+          ...v.bom.panels,
+          count: activePanelCount,
+        },
+      },
+      monthlySavingsEur: Math.round(v.monthlySavingsEur * yieldScale),
+      // Payback scales inversely with expected production. Removing a high-
+      // yield panel now hurts more than removing a weak one.
       paybackYears:
-        panelScale > 0
-          ? Math.round((v.paybackYears / panelScale) * 10) / 10
+        yieldScale > 0
+          ? Math.round((v.paybackYears / yieldScale) * 10) / 10
           : v.paybackYears,
     }));
-  }, [baseVariants, panelScale]);
+  }, [baseVariants, activePanelCount, yieldScale]);
 
   // Reconcile selected variant when variants list changes (e.g. live data swaps it).
   useEffect(() => {
@@ -452,9 +517,7 @@ export function InstallerLeadDetail({ lead, onLeadChange }: Props) {
   // assumes (lib/sizing/calculate.ts: 440 W modules).
   const panelCount = activePanelCount;
   const systemKwp =
-    removedPanelKeys.size > 0
-      ? Math.round(activePanelCount * PANEL_KWP * 10) / 10
-      : liveSizing?.systemKwp ?? lead.publicPreview.sizing.systemKwp;
+    Math.round(activePanelCount * PANEL_KWP * 10) / 10;
   const segmentsForLayout = liveSizing?.roofSegments ?? lead.publicPreview.sizing.roofSegments;
 
   // ---- AI-prefetched technical brief card data ----
@@ -580,11 +643,10 @@ export function InstallerLeadDetail({ lead, onLeadChange }: Props) {
           <div className="font-semibold text-[#F7F8FA]">{lead.publicPreview.district}</div>
           <div className="mt-0.5 text-[#9BA3AF]">Exact rooftop model · customer details gated</div>
         </div>
-        {/* Panel-edit toolbar: stacks toggle + edit-mode + reset on the
-            top-right of the photoreal view. Only renders when the AI has
-            produced (or the installer has placed) at least one panel. */}
+        {/* Panel-edit toolbar: bottom-right so it does not cover the
+            dimensions disclosure/camera controls in the top-right corner. */}
         {(solarPanels.length > 0 || manuallyAddedPanels.length > 0) ? (
-          <div className="absolute right-4 top-16 z-10 flex flex-col items-end gap-2">
+          <div className="absolute bottom-4 right-4 z-10 flex flex-col items-end gap-2">
             <button
               type="button"
               onClick={() => setShowPanels((v) => !v)}

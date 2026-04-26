@@ -379,21 +379,23 @@ export function PanelOverlayCesium({
         return;
       }
 
-      // Snap panels onto clean rows (V-only) before rendering. Manual panels
-      // pass through unchanged. Order is preserved so removedKeys still
-      // points at the right entities.
-      const snapped = snapPanelsToGrid(panels);
-      const sorted = [...snapped].sort(
+      // Sort/slice first, then snap only the displayed panels. Keys are based
+      // on the pre-snap Solar API centers so parent-side yield accounting and
+      // click toggles use the same stable identity.
+      const sorted = [...panels].sort(
         (a, b) => (b.yearlyEnergyDcKwh ?? 0) - (a.yearlyEnergyDcKwh ?? 0),
       );
-      const slice = sorted.slice(0, Math.max(0, desiredCount));
+      const originalSlice = sorted.slice(0, Math.max(0, desiredCount));
+      const snappedSlice = snapPanelsToGrid(originalSlice);
 
       const activeMaterial = Cesium.Color.fromCssColorString(ACTIVE_COLOR).withAlpha(0.7);
       const removedMaterial = Cesium.Color.fromCssColorString(REMOVED_COLOR).withAlpha(0.3);
       const manualMaterial = Cesium.Color.fromCssColorString(MANUAL_COLOR).withAlpha(0.75);
       const outlineColor = Cesium.Color.WHITE.withAlpha(0.6);
 
-      slice.forEach((panel, idx) => {
+      let manualIndex = 0;
+      snappedSlice.forEach((panel, idx) => {
+        const originalPanel = originalSlice[idx] ?? panel;
         const lat = panel.center.latitude;
         const lng = panel.center.longitude;
         if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
@@ -424,7 +426,13 @@ export function PanelOverlayCesium({
           flatHeights.push(c.lng, c.lat, h);
         }
 
-        const key = panelKey(idx, lat, lng);
+        const key = panel.manual
+          ? `manual-${manualIndex++}`
+          : panelKey(
+              idx,
+              originalPanel.center.latitude,
+              originalPanel.center.longitude,
+            );
         const isRemoved = removedKeys.has(key);
         const material = panel.manual
           ? manualMaterial
@@ -556,6 +564,10 @@ export function PanelOverlayCesium({
 
     return () => {
       cancelled = true;
+      if (viewer && !viewer.isDestroyed?.()) {
+        clearPanelEntities(viewer);
+        viewer.scene?.requestRender?.();
+      }
     };
   }, [viewer, panels, desiredCount, removedKeys, visible]);
 
