@@ -1088,12 +1088,14 @@ export function InstallerLeadDetail({ lead, onLeadChange }: Props) {
                   ) : null}
                   {/* Homeowner voice memo recorded at intake via Gradium AI.
                       Plays the audio in-line and shows the transcript Gradium
-                      STT generated server-side. Free-form context the form
-                      fields couldn't capture. */}
+                      STT generated server-side. The intake prompt asks them
+                      to describe what's on their roof — chimneys, dishes,
+                      antennas, dormers, shading trees — i.e. obstacles the
+                      satellite can't see and the AI can't model. */}
                   {lead.privateDetails.voiceNote?.audioDataUrl ? (
                     <div className="mt-3 rounded-md border border-[#62E6A7]/30 bg-[#62E6A7]/5 p-2.5">
                       <div className="mb-1.5 flex items-center justify-between gap-2 text-[10px] uppercase tracking-wider text-[#62E6A7]">
-                        <span>Voice memo · Gradium AI</span>
+                        <span>Roof obstructions (homeowner) · Gradium AI</span>
                         {typeof lead.privateDetails.voiceNote.durationMs === "number" ? (
                           <span className="tabular-nums text-[#9BA3AF]">
                             {(lead.privateDetails.voiceNote.durationMs / 1000).toFixed(1)} s

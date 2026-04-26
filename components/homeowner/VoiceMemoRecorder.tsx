@@ -211,9 +211,9 @@ export function VoiceMemoRecorder({ value, onChange, className = "" }: Props) {
   // Render
   return (
     <div className={`flex flex-col gap-1.5 ${className}`}>
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2">
         <span className="text-[10px] uppercase tracking-wider text-[#9BA3AF]">
-          Voice memo (optional) — Gradium AI
+          Roof obstructions (optional) — Gradium AI
         </span>
         {value ? (
           <button
@@ -226,6 +226,11 @@ export function VoiceMemoRecorder({ value, onChange, className = "" }: Props) {
           </button>
         ) : null}
       </div>
+      <p className="-mt-0.5 text-[11px] leading-snug text-[#5B6470]">
+        Tell the installer what&rsquo;s on your roof — chimneys, satellite dishes,
+        skylights, antennas, vent pipes, dormers, or anything that shades it
+        (tall trees, neighbours&rsquo; buildings). Anything the satellite can&rsquo;t see.
+      </p>
 
       {value ? (
         <div className="flex flex-col gap-2 rounded-lg border border-[#62E6A7]/40 bg-[#62E6A7]/5 p-2.5">
@@ -273,7 +278,7 @@ export function VoiceMemoRecorder({ value, onChange, className = "" }: Props) {
           className="flex w-full items-center justify-center gap-2 rounded-lg border border-[#2A3038] bg-[#12161C] px-3 py-2.5 text-sm text-[#9BA3AF] transition-colors hover:border-[#62E6A7] hover:text-[#62E6A7]"
         >
           <Mic size={14} />
-          Tap to record a voice note
+          Tap to describe what&rsquo;s on your roof
         </button>
       )}
 
