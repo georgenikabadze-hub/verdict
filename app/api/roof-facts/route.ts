@@ -131,11 +131,15 @@ export async function GET(req: NextRequest) {
               orientation: (p.orientation ?? "LANDSCAPE") as "LANDSCAPE" | "PORTRAIT",
               segmentIndex: segIdx,
               yearlyEnergyDcKwh: p.yearlyEnergyDcKwh ?? 0,
-              // Per-panel WGS84 height + segment azimuth so the Cesium
-              // overlay can place each panel at the correct elevation and
-              // rotate it to match the roof slope direction.
+              // Per-panel WGS84 height + segment azimuth + pitch + center lat/lng
+              // so the Cesium overlay can project each panel corner onto the
+              // segment's analytic roof plane (panels tilt with the slope
+              // instead of rendering flat at the segment center height).
               segmentHeightMeters: seg?.planeHeightAtCenterMeters,
               segmentAzimuthDegrees: seg?.azimuthDegrees,
+              segmentPitchDegrees: seg?.pitchDegrees,
+              segmentCenterLat: seg?.center?.latitude,
+              segmentCenterLng: seg?.center?.longitude,
             };
           })
           .filter(

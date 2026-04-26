@@ -53,6 +53,9 @@ interface RoofFactsResponse {
     yearlyEnergyDcKwh: number;
     segmentAzimuthDegrees?: number;
     segmentHeightMeters?: number;
+    segmentPitchDegrees?: number;
+    segmentCenterLat?: number;
+    segmentCenterLng?: number;
   }>;
 }
 
@@ -296,7 +299,11 @@ export function InstallerLeadDetail({ lead, onLeadChange }: Props) {
           yearlyEnergyDcKwh: p.yearlyEnergyDcKwh,
           segmentAzimuthDegrees:
             p.segmentAzimuthDegrees ?? segments[p.segmentIndex]?.azimuthDegrees,
+          segmentPitchDegrees:
+            p.segmentPitchDegrees ?? segments[p.segmentIndex]?.pitchDegrees,
           segmentHeightMeters: p.segmentHeightMeters,
+          segmentCenterLat: p.segmentCenterLat,
+          segmentCenterLng: p.segmentCenterLng,
         }));
         setSolarPanels(enriched);
 
@@ -480,20 +487,31 @@ export function InstallerLeadDetail({ lead, onLeadChange }: Props) {
     return [...aiSlice, ...manuallyAddedPanels];
   }, [solarPanels, manuallyAddedPanels, sizerPanelCount]);
 
-  // Default azimuth for new manual panels — use the dominant segment's
-  // azimuth in degrees, so they tilt with the roof slope direction.
+  // Default azimuth + pitch for new manual panels — use the dominant
+  // segment's values so click-to-add panels tilt with the same slope as
+  // their AI counterparts.
   const dominantAzimuthDegrees = useMemo<number>(() => {
     const segs = liveSegments ?? [];
     if (segs.length === 0) return 0;
     const sorted = [...segs].sort((a, b) => b.areaMeters2 - a.areaMeters2);
     return Math.round(sorted[0].azimuthDegrees ?? 180);
   }, [liveSegments]);
+  const dominantPitchDegrees = useMemo<number>(() => {
+    const segs = liveSegments ?? [];
+    if (segs.length === 0) return 0;
+    const sorted = [...segs].sort((a, b) => b.areaMeters2 - a.areaMeters2);
+    return Math.round(sorted[0].pitchDegrees ?? 0);
+  }, [liveSegments]);
 
   return (
-    <div
-      className="grid min-h-0 flex-1 grid-rows-[minmax(380px,55vh)_1fr] bg-[#0A0E1A] xl:grid-cols-[minmax(0,1fr)_minmax(360px,400px)] xl:grid-rows-[1fr]"
-    >
-      <section className="relative overflow-hidden border-b border-[#2A3038] bg-[#0A0E1A] xl:border-b-0 xl:border-r">
+    // Stacked layout: full-width photoreal map on top, dashboard scrolls
+    // below. The map gets the user's full screen real estate so they can
+    // pan/zoom/edit panels comfortably without competing with a side panel
+    // for cursor space, then they scroll for the BoM + variant cards.
+    // Map height = min(720px, 70vh) so it dominates a typical 1080p laptop
+    // screen but doesn't go absurd on a 1440p+ monitor.
+    <div className="flex min-h-0 flex-1 flex-col bg-[#0A0E1A]">
+      <section className="relative h-[min(720px,70vh)] flex-shrink-0 overflow-hidden border-b border-[#2A3038] bg-[#0A0E1A]">
         <CesiumRoofView
           coords={{ lat: lead.privateDetails.lat, lng: lead.privateDetails.lng }}
           address={unlocked ? lead.privateDetails.address : lead.publicPreview.district}
@@ -510,6 +528,7 @@ export function InstallerLeadDetail({ lead, onLeadChange }: Props) {
           editMode={editMode}
           onPanelAdd={addManualPanel}
           defaultAzimuthDegrees={dominantAzimuthDegrees}
+          defaultPitchDegrees={dominantPitchDegrees}
         />
         <div className="pointer-events-none absolute left-4 top-4 rounded-md border border-[#2A3038] bg-[#0A0E1A]/80 px-3 py-2 text-xs backdrop-blur">
           <div className="font-semibold text-[#F7F8FA]">{lead.publicPreview.district}</div>
@@ -561,7 +580,7 @@ export function InstallerLeadDetail({ lead, onLeadChange }: Props) {
         ) : null}
       </section>
 
-      <section className="flex flex-col gap-5 overflow-y-auto p-5 xl:p-6">
+      <section className="flex flex-1 flex-col gap-5 overflow-y-auto p-5 xl:p-6">
         <div className="flex flex-col gap-5">
           {/* AI-prefetched technical brief card */}
           <section className="rounded-lg border border-[#3DAEFF]/30 bg-gradient-to-br from-[#12161C] to-[#0A0E1A] p-4">

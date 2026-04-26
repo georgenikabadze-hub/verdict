@@ -446,8 +446,35 @@ export function composeFromMarket(args: ComposeFromMarketArgs): SizingResultWith
   // already rejects this case upstream — we just stay defensive).
   const fitMaxSafe = Math.max(1, panelFitMax);
 
+  // Demand-coverage cap. Without this, the NPV optimizer keeps adding
+  // panels until roof fit max because German feed-in tariff (€0.08/kWh)
+  // still produces marginally positive 25-yr NPV per panel — which sells
+  // homeowners a 24 kWp commercial-scale system on a typical residential
+  // roof. We cap the optimizer's search at 125 % of *future* demand
+  // (current consumption + heat pump + EV inflation per intake prefs)
+  // so the recommendation tracks payback speed, not absolute NPV.
+  // "yes" = full inflation, "idk" = half, "no" = none.
+  const futureDemandKwh =
+    annualKwhRaw +
+    (intake.wantsHeatPump === "yes"
+      ? 3500
+      : intake.wantsHeatPump === "idk"
+        ? 1500
+        : 0) +
+    (intake.evPref === "yes" || intake.ev
+      ? 2500
+      : intake.evPref === "idk"
+        ? 1200
+        : 0);
+  const DEMAND_COVERAGE_CAP = 1.25;
+  const demandPanelCap = Math.ceil(
+    (futureDemandKwh * DEMAND_COVERAGE_CAP) / KWH_PER_PANEL_PER_YEAR_DE,
+  );
+  // Final cap = min(physical roof fit, demand-coverage). Always ≥ 1.
+  const roiFitMax = Math.max(1, Math.min(fitMaxSafe, demandPanelCap));
+
   const roi = optimizePanelCountForRoi({
-    panelFitMax: fitMaxSafe,
+    panelFitMax: roiFitMax,
     segments: roofSegments,
     annualKwh: annualKwhRaw,
     dailyKwh,
@@ -457,7 +484,7 @@ export function composeFromMarket(args: ComposeFromMarketArgs): SizingResultWith
     batteryEurPerKwh: Number.isFinite(batteryEurPerKwh) ? batteryEurPerKwh : 600,
   });
 
-  const panelCount = Math.min(fitMaxSafe, Math.max(1, roi.panelCount));
+  const panelCount = Math.min(roiFitMax, Math.max(1, roi.panelCount));
   const systemKwpRaw = panelCount * PANEL_KW;
   const systemKwp = round1(systemKwpRaw);
 

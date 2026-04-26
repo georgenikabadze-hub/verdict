@@ -218,6 +218,44 @@ function createCirclePolygon(
   });
 }
 
+function pointInPolygon(pt: OsmLatLng, poly: OsmLatLng[]): boolean {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i].lng;
+    const yi = poly[i].lat;
+    const xj = poly[j].lng;
+    const yj = poly[j].lat;
+    const intersect =
+      yi > pt.lat !== yj > pt.lat &&
+      pt.lng < ((xj - xi) * (pt.lat - yi)) / (yj - yi || 1e-12) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+function distanceToPolygonM(pt: OsmLatLng, poly: OsmLatLng[]): number {
+  if (poly.length < 3) return Infinity;
+  if (pointInPolygon(pt, poly)) return 0;
+  const cosLat = Math.cos((pt.lat * Math.PI) / 180);
+  const px = pt.lng * 111_320 * cosLat;
+  const py = pt.lat * 111_320;
+  let min = Infinity;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const ax = poly[j].lng * 111_320 * cosLat;
+    const ay = poly[j].lat * 111_320;
+    const bx = poly[i].lng * 111_320 * cosLat;
+    const by = poly[i].lat * 111_320;
+    const dx = bx - ax;
+    const dy = by - ay;
+    const len2 = dx * dx + dy * dy || 1e-12;
+    const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len2));
+    const cx = ax + t * dx;
+    const cy = ay + t * dy;
+    min = Math.min(min, Math.hypot(px - cx, py - cy));
+  }
+  return min;
+}
+
 function createBufferedBoundingBoxPolygon(
   boundingBox: BoundingBox,
   bufferM: number,
@@ -375,7 +413,11 @@ async function applyBuildingClip(
     const cosLat = Math.cos((bboxCenterLat * Math.PI) / 180);
     const dLngM = (osmCenterLng - bboxCenterLng) * 111_320 * cosLat;
     const offsetMeters = Math.sqrt(dLatM * dLatM + dLngM * dLngM);
-    if (offsetMeters > 25) {
+    const bboxCenterDistanceM = distanceToPolygonM(
+      { lat: bboxCenterLat, lng: bboxCenterLng },
+      osmFootprint.polygon,
+    );
+    if (offsetMeters > 25 || bboxCenterDistanceM > 8) {
       // OSM and Solar disagree on which building this is — trust Solar
       // because that's where the panels will appear.
       osmFootprint = null;
@@ -399,6 +441,7 @@ async function applyBuildingClip(
         totalRoofAreaM2: roofFacts?.totalAreaM2,
         roofPitchDeg,
         source: "osm",
+        target: osmFootprint.centroid,
       };
     } catch {
       // ClippingPolygon construction can throw on degenerate / self-
@@ -494,6 +537,10 @@ export default function CesiumRoofViewInner({ coords, address, onViewerReady }: 
   const targetRef = useRef<any>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const cesiumRef = useRef<any>(null);
+  // The wheel-zoom listener we install on the canvas so we can detach it
+  // on unmount / viewer change without leaking listeners on the canvas
+  // (which Cesium itself can outlive in dev hot-reload scenarios).
+  const wheelHandlerRef = useRef<((e: WheelEvent) => void) | null>(null);
 
   const [status, setStatus] = useState<Status>("loading");
   const [dimensions, setDimensions] = useState<RoofDimensions | null>(null);
@@ -672,6 +719,51 @@ export default function CesiumRoofViewInner({ coords, address, onViewerReady }: 
         const controller = viewer.scene.screenSpaceCameraController;
         controller.enableTranslate = false;
         controller.minimumZoomDistance = MINIMUM_ZOOM_DISTANCE_M;
+        // Cap zoom-out so the user can't fly out into space and lose the
+        // building. 600 m is enough to see neighborhood context on the
+        // tightest building footprints.
+        controller.maximumZoomDistance = 600;
+
+        // Cross-platform wheel zoom. Cesium's default wheel handler scales
+        // movement linearly with deltaY: a macOS trackpad pinch fires
+        // deltaY ~1–10 per gesture tick (smooth), but a Windows mouse wheel
+        // fires deltaY ~100+ per detent — so the camera leaps 50–100 m per
+        // click. We do NOT replace Cesium's WHEEL handler (that path drifts
+        // the camera off its lookAtTransform anchor and made the photoreal
+        // mesh disappear from view). Instead we re-pin the lookAtTransform
+        // immediately after every wheel event using the current heading +
+        // pitch + a clamped range. Cesium has already moved the camera by
+        // that point — we just normalise where it ended up.
+        const ZOOM_BOUNDS_MIN = MINIMUM_ZOOM_DISTANCE_M;
+        const ZOOM_BOUNDS_MAX = 600;
+        const wheelZoom = (e: WheelEvent) => {
+          // Only act on real vertical wheel intent. Horizontal trackpad
+          // swipes shouldn't move the camera.
+          if (Math.sign(e.deltaY) === 0) return;
+          // Allow Cesium's default wheel handler to run first; we re-pin
+          // on the next frame so heading/pitch are read after Cesium
+          // applied its movement, not before.
+          requestAnimationFrame(() => {
+            if (!viewerRef.current || viewerRef.current.isDestroyed?.()) return;
+            const t = targetRef.current;
+            if (!t) return;
+            const camera = viewer.scene.camera;
+            const range = Cesium.Cartesian3.magnitude(camera.position);
+            if (!Number.isFinite(range) || range <= 0) return;
+            // Inside bounds → leave the camera alone (Cesium's transform
+            // is intact). Only re-pin when we'd otherwise leave bounds.
+            if (range >= ZOOM_BOUNDS_MIN && range <= ZOOM_BOUNDS_MAX) return;
+            const heading = camera.heading;
+            const pitch = camera.pitch;
+            const clamped = Math.max(ZOOM_BOUNDS_MIN, Math.min(ZOOM_BOUNDS_MAX, range));
+            camera.lookAtTransform(
+              Cesium.Transforms.eastNorthUpToFixedFrame(t),
+              new Cesium.HeadingPitchRange(heading, pitch, clamped),
+            );
+          });
+        };
+        viewer.scene.canvas.addEventListener("wheel", wheelZoom, { passive: true });
+        wheelHandlerRef.current = wheelZoom;
 
         // Tiles need to be near the camera before sampleHeightMostDetailed
         // returns useful data. Pointing the camera at the location first —
@@ -732,6 +824,20 @@ export default function CesiumRoofViewInner({ coords, address, onViewerReady }: 
 
     return () => {
       cancelled = true;
+      // Detach the wheel listener BEFORE destroying the viewer — once the
+      // canvas is gone, removeEventListener is a no-op but it's still good
+      // hygiene and avoids any chance of a listener firing on a dead canvas.
+      if (wheelHandlerRef.current && viewerRef.current?.scene?.canvas) {
+        try {
+          viewerRef.current.scene.canvas.removeEventListener(
+            "wheel",
+            wheelHandlerRef.current,
+          );
+        } catch {
+          /* ignore */
+        }
+        wheelHandlerRef.current = null;
+      }
       if (viewerRef.current) {
         try {
           viewerRef.current.destroy();

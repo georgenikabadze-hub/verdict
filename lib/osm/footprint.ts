@@ -214,8 +214,19 @@ function clamp(value: number, lo: number, hi: number): number {
 function scoreCandidate(c: Candidate, query: LatLng): number {
   const contains = pointInPolygon(query, c.polygon);
   const distanceM = contains ? 0 : distanceToPolygonM(query, c.polygon);
+  // Tag-richness gate on the contains-bonus. A geocoded "house number 12"
+  // can land INSIDE multiple stacked Berlin Altbau buildings (Vorderhaus on
+  // the street + Hinterhaus in the courtyard sharing the same parcel). The
+  // Vorderhaus carries `building=*` tags; the Hinterhaus is often tagless.
+  // Giving every contains-true polygon a flat +100 lets the tagless
+  // Hinterhaus beat the actual addressed Vorderhaus, which then breaks the
+  // Cesium clip + makes Solar API panels float over the wrong building.
+  // Demoting tagless contains-true polygons to +40 still preserves the
+  // contains signal (they beat far-away buildings) but lets a tagged sibling
+  // win on tie.
+  const containsBonus = contains ? (tagBuilding(c.tags) ? 100 : 40) : 0;
   return (
-    (contains ? 100 : 0) +
+    containsBonus +
     clamp(35 - distanceM, 0, 35) +
     clamp(c.areaM2 / 20, 0, 20) +
     (isLikelyHouse(c.tags) ? 10 : 0) -

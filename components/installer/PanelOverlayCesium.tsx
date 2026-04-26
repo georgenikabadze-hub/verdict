@@ -25,6 +25,15 @@ export interface SolarPanelEntry {
    *  for AI-placed panels, or from Cesium scene.pickPosition for manually
    *  placed panels. */
   segmentHeightMeters?: number;
+  /** Segment pitch (degrees, 0=flat). Combined with azimuth + center lat/lng
+   *  + height, this defines the analytic roof plane each panel corner is
+   *  projected onto so panels lie ON the slope rather than floating flat at
+   *  the segment-center height. */
+  segmentPitchDegrees?: number;
+  /** Segment center lat/lng — the reference point for the plane equation.
+   *  When absent, plane-fit falls back to flat at segmentHeightMeters. */
+  segmentCenterLat?: number;
+  segmentCenterLng?: number;
   /** Manually-placed panels carry this flag so we can style them differently
    *  (e.g. green vs blue) and so the click handler knows it's removing a
    *  manual panel, not toggling an AI panel. */
@@ -53,6 +62,10 @@ interface Props {
   /** Default azimuth for manually-placed panels (degrees, north=0).
    *  Pass the dominant segment azimuth so manual panels align with the roof. */
   defaultAzimuthDegrees?: number;
+  /** Default pitch for manually-placed panels (degrees, 0=flat).
+   *  Used by the plane-fit so manual panels tilt with the dominant roof
+   *  slope rather than rendering flat at the picked mesh height. */
+  defaultPitchDegrees?: number;
 }
 
 // Real-world residential panel dimensions. Default to a 440 Wp M10 module
@@ -75,6 +88,50 @@ const MANUAL_COLOR = "#62E6A7";       // manually placed by installer
 
 export function panelKey(idx: number, lat: number, lng: number): string {
   return `${ENTITY_NAME_PREFIX}${idx}-${lat.toFixed(6)}-${lng.toFixed(6)}`;
+}
+
+/**
+ * Project a lat/lng onto the analytic roof plane defined by a segment's center,
+ * pitch, azimuth, and ellipsoidal height. Returns the WGS84 height where that
+ * point sits on the plane.
+ *
+ * Plane definition (Google Solar API convention):
+ *   - center (segLat, segLng) at height segHeight
+ *   - pitch p (deg, 0 = flat)
+ *   - azimuth a (deg, north = 0, clockwise) is the DOWNHILL direction the
+ *     roof faces (south-facing roof: a = 180)
+ *
+ * Height at any (lat, lng):
+ *   downhillUnit_E = sin(a)
+ *   downhillUnit_N = cos(a)
+ *   dE = (lng - segLng) * 111320 * cos(segLat)
+ *   dN = (lat - segLat) * 111320
+ *   downhillDist = dE * downhillUnit_E + dN * downhillUnit_N
+ *   height = segHeight - tan(p) * downhillDist
+ *
+ * For pitch ~ 0 (flat roof) this returns segHeight everywhere — correct.
+ */
+function planeFitHeight(
+  cornerLat: number,
+  cornerLng: number,
+  segLat: number,
+  segLng: number,
+  segHeight: number,
+  pitchDeg: number,
+  azimuthDeg: number,
+): number {
+  if (!Number.isFinite(segHeight)) return 0;
+  if (pitchDeg <= 0.5) return segHeight;
+  const tanPitch = Math.tan((pitchDeg * Math.PI) / 180);
+  const azRad = (azimuthDeg * Math.PI) / 180;
+  const downE = Math.sin(azRad);
+  const downN = Math.cos(azRad);
+  const cosLat = Math.cos((segLat * Math.PI) / 180);
+  const safeCosLat = Math.abs(cosLat) < 1e-6 ? 1e-6 : cosLat;
+  const dE = (cornerLng - segLng) * 111_320 * safeCosLat;
+  const dN = (cornerLat - segLat) * 111_320;
+  const downhillDist = dE * downE + dN * downN;
+  return segHeight - tanPitch * downhillDist;
 }
 
 /**
@@ -124,6 +181,90 @@ function panelCorners(
 }
 
 /**
+ * Snap AI panels onto clean horizontal rows aligned with each roof segment's
+ * ridge, preserving Google's along-row spacing so chimneys, dormers,
+ * skylights, and other obstructions Google already routed around stay
+ * routed-around. Conservative by design: we only snap V (down-slope index)
+ * — U (along-ridge position) is left exactly where Google placed it.
+ *
+ * Visual effect: rows line up across the roof; gaps within a row stay where
+ * Google left them. Manual panels (segmentIndex = -1) are skipped entirely
+ * because the user's click site is already authoritative.
+ *
+ * Returns a NEW array of panels with updated center.lat/lng. Input order is
+ * preserved so panelKey()-based mappings (removedKeys) don't shift.
+ */
+function snapPanelsToGrid(panels: SolarPanelEntry[]): SolarPanelEntry[] {
+  // Group by segment (manual panels keep segmentIndex = -1 → bucket apart).
+  const bySegment = new Map<number, SolarPanelEntry[]>();
+  panels.forEach((p) => {
+    const arr = bySegment.get(p.segmentIndex) ?? [];
+    arr.push(p);
+    bySegment.set(p.segmentIndex, arr);
+  });
+
+  // Output indexed by the original panel reference so we can restore input order.
+  const out = new Map<SolarPanelEntry, SolarPanelEntry>();
+
+  for (const [segIdx, segPanels] of bySegment) {
+    if (segIdx < 0) {
+      for (const p of segPanels) out.set(p, p);
+      continue;
+    }
+
+    const ref = segPanels.find(
+      (p) =>
+        Number.isFinite(p.segmentCenterLat) &&
+        Number.isFinite(p.segmentCenterLng) &&
+        Number.isFinite(p.segmentAzimuthDegrees),
+    );
+    if (!ref) {
+      for (const p of segPanels) out.set(p, p);
+      continue;
+    }
+
+    const segLat = ref.segmentCenterLat as number;
+    const segLng = ref.segmentCenterLng as number;
+    const azDeg = ref.segmentAzimuthDegrees as number;
+    const azRad = (azDeg * Math.PI) / 180;
+    const downE = Math.sin(azRad);
+    const downN = Math.cos(azRad);
+    const ridgeE = Math.cos(azRad);
+    const ridgeN = -Math.sin(azRad);
+    const cosLat = Math.cos((segLat * Math.PI) / 180);
+    const safeCosLat = Math.abs(cosLat) < 1e-6 ? 1e-6 : cosLat;
+
+    for (const p of segPanels) {
+      const dims = PANEL_DIMS[p.orientation] ?? PANEL_DIMS.LANDSCAPE;
+      // Row pitch (down-slope) is one panel-height + 5 cm visual gap. We do
+      // NOT step U because that's where Google's obstruction avoidance lives.
+      const cellV = dims.hM + 0.05;
+
+      const dE = (p.center.longitude - segLng) * 111_320 * safeCosLat;
+      const dN = (p.center.latitude - segLat) * 111_320;
+      const u = dE * ridgeE + dN * ridgeN;
+      const v = dE * downE + dN * downN;
+
+      const vIdx = Math.round(v / cellV);
+      const vS = vIdx * cellV;
+      // U stays exactly where Google placed it — preserves panel-sized gaps
+      // around chimneys/skylights along the row.
+      const dE_s = u * ridgeE + vS * downE;
+      const dN_s = u * ridgeN + vS * downN;
+      const newLat = segLat + dN_s / 111_320;
+      const newLng = segLng + dE_s / (111_320 * safeCosLat);
+
+      out.set(p, {
+        ...p,
+        center: { latitude: newLat, longitude: newLng },
+      });
+    }
+  }
+
+  return panels.map((p) => out.get(p) ?? p);
+}
+
+/**
  * Fully removes any entity whose name starts with our prefix. We track entities
  * by stable name (panel-${idx}-${lat}-${lng}), so on every render we tear down
  * and rebuild — keeps the diff logic simple and the entity count bounded by
@@ -158,6 +299,7 @@ export function PanelOverlayCesium({
   editMode = false,
   onPanelAdd,
   defaultAzimuthDegrees = 0,
+  defaultPitchDegrees = 0,
 }: Props) {
   // Stash the latest callbacks + edit-mode flag in refs so the
   // ScreenSpaceEventHandler — which is keyed only on `viewer` — always reads
@@ -166,6 +308,7 @@ export function PanelOverlayCesium({
   const editModeRef = useRef(editMode);
   const onPanelAddRef = useRef<((panel: SolarPanelEntry) => void) | undefined>(onPanelAdd);
   const defaultAzimuthRef = useRef(defaultAzimuthDegrees);
+  const defaultPitchRef = useRef(defaultPitchDegrees);
 
   useEffect(() => {
     onClickRef.current = onPanelClick;
@@ -179,20 +322,54 @@ export function PanelOverlayCesium({
   useEffect(() => {
     defaultAzimuthRef.current = defaultAzimuthDegrees;
   }, [defaultAzimuthDegrees]);
+  useEffect(() => {
+    defaultPitchRef.current = defaultPitchDegrees;
+  }, [defaultPitchDegrees]);
 
   // -------------------------------------------------------------------------
   // Render panel polygons.
-  // We re-run on every input change. Each pass: fully clear our entities, then
-  // re-add the top-N (or none, when hidden). Keeps the entity count bounded.
+  //
+  // Two-phase render to handle the height-datum mismatch between Google
+  // Solar API (`planeHeightAtCenterMeters` is "above sea level" / orthometric)
+  // and Photoreal 3D Tiles (WGS84 ellipsoidal). In Berlin the geoid undulation
+  // is ~+45 m, which would land panels metres below the rendered roof if we
+  // trusted the Solar API height directly. Resolution strategy:
+  //
+  //   • Snap input panels onto clean rows (snapPanelsToGrid above) so the
+  //     visual layout reads as an actual install, not Google's scatter.
+  //   • Phase 1 (sync): render with Solar API heights. Wrong altitude but the
+  //     user sees the layout instantly.
+  //   • Phase 2 (async, after 1.5 s): sample the photoreal mesh at each
+  //     UNIQUE SEGMENT CENTER (not each panel — segment centers are
+  //     guaranteed to be on roof per Solar API; panel centers might fall
+  //     into courtyards or mesh gaps). Compute a global geoid offset from
+  //     the FIRST plausible sample, then re-anchor every segment's plane.
+  //     Sanity-check each sample against `solarHeight + globalOffset` —
+  //     if a sample diverges by > 5 m it's almost certainly hitting
+  //     ground / ungenerated mesh and we discard it.
+  //
+  // We re-run on every input change; each pass fully clears our entities
+  // and rebuilds. Entity count stays bounded by `desiredCount` (≤ 200).
   // -------------------------------------------------------------------------
   useEffect(() => {
     if (!viewer || viewer.isDestroyed?.()) return;
 
     let cancelled = false;
 
-    (async () => {
+    // Tolerance for trusting a mesh sample against the Solar API plane.
+    // 5 m gives us slack for normal roof geometry noise (eaves, dormers)
+    // while clearly catching samples that hit the ground (~10–60 m off).
+    const SAMPLE_SANITY_TOLERANCE_M = 5;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const renderPanels = (
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const Cesium: any = await import("cesium");
+      Cesium: any,
+      // Map from segmentIndex → trusted WGS84 plane anchor height. Empty
+      // on phase 1; populated on phase 2 with sanity-checked mesh samples
+      // (or Solar height + global offset for failed samples).
+      segmentHeightMap?: Map<number, number>,
+    ) => {
       if (cancelled || !viewer || viewer.isDestroyed?.()) return;
 
       clearPanelEntities(viewer);
@@ -202,7 +379,11 @@ export function PanelOverlayCesium({
         return;
       }
 
-      const sorted = [...panels].sort(
+      // Snap panels onto clean rows (V-only) before rendering. Manual panels
+      // pass through unchanged. Order is preserved so removedKeys still
+      // points at the right entities.
+      const snapped = snapPanelsToGrid(panels);
+      const sorted = [...snapped].sort(
         (a, b) => (b.yearlyEnergyDcKwh ?? 0) - (a.yearlyEnergyDcKwh ?? 0),
       );
       const slice = sorted.slice(0, Math.max(0, desiredCount));
@@ -219,16 +400,28 @@ export function PanelOverlayCesium({
 
         const dims = PANEL_DIMS[panel.orientation] ?? PANEL_DIMS.LANDSCAPE;
         const azimuth = panel.segmentAzimuthDegrees ?? 0;
+        const pitch = panel.segmentPitchDegrees ?? 0;
         const corners = panelCorners(lat, lng, dims.wM, dims.hM, azimuth);
 
-        // Real WGS84 height of the roof plane at this panel. Without this we'd
-        // place the panel at sea level (= underground in Berlin). Default to
-        // 0.15 m only as a last-resort fallback so we still see SOMETHING.
-        const baseHeight = (panel.segmentHeightMeters ?? 0) + PANEL_HEIGHT_OFFSET_M;
+        // Anchor plane at the SEGMENT center (not panel center) so every
+        // panel in the same segment shares one calibrated height — that
+        // avoids individual panels falling onto courtyards when their own
+        // sample fails. Manual panels carry their own segmentCenter == panel
+        // center so this still works for click-placed modules.
+        const segLat = panel.segmentCenterLat ?? lat;
+        const segLng = panel.segmentCenterLng ?? lng;
+        const solarHeight = panel.segmentHeightMeters ?? 0;
+        const meshHeight = segmentHeightMap?.get(panel.segmentIndex);
+        const anchorHeight = Number.isFinite(meshHeight)
+          ? (meshHeight as number)
+          : solarHeight;
 
         const flatHeights: number[] = [];
         for (const c of corners) {
-          flatHeights.push(c.lng, c.lat, baseHeight);
+          const h =
+            planeFitHeight(c.lat, c.lng, segLat, segLng, anchorHeight, pitch, azimuth) +
+            PANEL_HEIGHT_OFFSET_M;
+          flatHeights.push(c.lng, c.lat, h);
         }
 
         const key = panelKey(idx, lat, lng);
@@ -245,12 +438,12 @@ export function PanelOverlayCesium({
             name: key,
             polygon: {
               hierarchy: Cesium.Cartesian3.fromDegreesArrayHeights(flatHeights),
-              // height + extrudedHeight gives the polygon a slight 5 cm
-              // thickness so it reads like a physical module rather than a
-              // flat decal. perPositionHeight keeps it in absolute WGS84
-              // metres so it survives camera zoom.
+              // perPositionHeight keeps each corner at its own WGS84 height
+              // so the rectangle tilts with the roof slope. We deliberately
+              // omit `extrudedHeight` here: a single scalar top would build
+              // a wedge against per-corner bottoms. The thin outline gives
+              // the panel definition without the extrusion artifact.
               perPositionHeight: true,
-              extrudedHeight: baseHeight + PANEL_THICKNESS_M,
               material,
               outline: true,
               outlineColor,
@@ -265,6 +458,100 @@ export function PanelOverlayCesium({
       });
 
       viewer.scene?.requestRender?.();
+    };
+
+    (async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const Cesium: any = await import("cesium");
+      if (cancelled || !viewer || viewer.isDestroyed?.()) return;
+
+      // Phase 1: render with Solar API heights so the user sees something fast.
+      renderPanels(Cesium);
+
+      if (!visible || desiredCount <= 0 || panels.length === 0) return;
+
+      // Phase 2: collect unique segment centers (one sample per roof plane
+      // instead of one per panel — far fewer samples, far higher hit rate
+      // on the photoreal mesh because Solar API guarantees segment centers
+      // are on a detected roof).
+      interface SegSample {
+        segIndex: number;
+        lat: number;
+        lng: number;
+        solarHeight: number;
+      }
+      const seen = new Set<number>();
+      const segSamples: SegSample[] = [];
+      for (const p of panels) {
+        if (
+          p.segmentIndex < 0 ||
+          seen.has(p.segmentIndex) ||
+          !Number.isFinite(p.segmentCenterLat) ||
+          !Number.isFinite(p.segmentCenterLng) ||
+          !Number.isFinite(p.segmentHeightMeters)
+        ) {
+          continue;
+        }
+        seen.add(p.segmentIndex);
+        segSamples.push({
+          segIndex: p.segmentIndex,
+          lat: p.segmentCenterLat as number,
+          lng: p.segmentCenterLng as number,
+          solarHeight: p.segmentHeightMeters as number,
+        });
+      }
+      if (segSamples.length === 0) return;
+
+      await new Promise((r) => setTimeout(r, 1500));
+      if (cancelled || !viewer || viewer.isDestroyed?.()) return;
+
+      try {
+        if (typeof viewer.scene?.sampleHeightMostDetailed !== "function") return;
+        const carts = segSamples.map((s) =>
+          Cesium.Cartographic.fromDegrees(s.lng, s.lat),
+        );
+        const result = await viewer.scene.sampleHeightMostDetailed(carts);
+        if (cancelled || !viewer || viewer.isDestroyed?.()) return;
+
+        // Pass 1: derive a global geoid offset from any single trusted sample.
+        // We pick the LARGEST (segment with highest planeHeight is most
+        // likely a real roof, not a hidden noise segment).
+        let globalOffset: number | undefined;
+        const candidates = segSamples
+          .map((s, i) => ({ s, h: result[i]?.height as number | undefined }))
+          .filter((x) => Number.isFinite(x.h));
+        if (candidates.length > 0) {
+          candidates.sort((a, b) => b.s.solarHeight - a.s.solarHeight);
+          const best = candidates[0];
+          globalOffset = (best.h as number) - best.s.solarHeight;
+        }
+
+        // Pass 2: build the segIndex → trusted-anchor-height map.
+        // - If a sample landed within tolerance of (solar + offset), trust it.
+        // - Otherwise (failed / wildly off / hit ground), use solar + offset.
+        const segHeightMap = new Map<number, number>();
+        segSamples.forEach((s, i) => {
+          const sampled = result[i]?.height as number | undefined;
+          const expected =
+            globalOffset !== undefined ? s.solarHeight + globalOffset : undefined;
+          if (
+            Number.isFinite(sampled) &&
+            (expected === undefined ||
+              Math.abs((sampled as number) - expected) <= SAMPLE_SANITY_TOLERANCE_M)
+          ) {
+            segHeightMap.set(s.segIndex, sampled as number);
+          } else if (expected !== undefined) {
+            segHeightMap.set(s.segIndex, expected);
+          } else {
+            segHeightMap.set(s.segIndex, s.solarHeight);
+          }
+        });
+
+        renderPanels(Cesium, segHeightMap);
+      } catch {
+        // Sampling can throw if the scene tears down mid-await; phase-1
+        // entities are still on screen so we just leave them as-is.
+      }
     })();
 
     return () => {
@@ -311,15 +598,20 @@ export function PanelOverlayCesium({
             const worldPos = viewer.scene.pickPosition?.(event.position);
             if (!worldPos) return;
             const cartographic = Cesium.Cartographic.fromCartesian(worldPos);
+            const lat = Cesium.Math.toDegrees(cartographic.latitude);
+            const lng = Cesium.Math.toDegrees(cartographic.longitude);
             const newPanel: SolarPanelEntry = {
-              center: {
-                latitude: Cesium.Math.toDegrees(cartographic.latitude),
-                longitude: Cesium.Math.toDegrees(cartographic.longitude),
-              },
+              center: { latitude: lat, longitude: lng },
               orientation: "LANDSCAPE",
               segmentIndex: -1,
               yearlyEnergyDcKwh: 0,
               segmentAzimuthDegrees: defaultAzimuthRef.current,
+              segmentPitchDegrees: defaultPitchRef.current,
+              // Anchor the plane at the panel's own center so plane-fit passes
+              // through the picked mesh height; corners tilt around it using
+              // the dominant pitch/azimuth.
+              segmentCenterLat: lat,
+              segmentCenterLng: lng,
               segmentHeightMeters: cartographic.height,
               manual: true,
             };
