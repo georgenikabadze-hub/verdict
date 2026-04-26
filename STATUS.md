@@ -66,6 +66,43 @@ HOMEOWNER:
   Push notification → opens link → sees the 3 variants for the first time
 ```
 
+### Two-phase Tavily strategy (decided 2026-04-26 ~04:00 Sun)
+
+**Tavily runs ONCE during build/setup, NOT on every installer click.** Live API at demo time is a jury-risk; cached catalog is bulletproof.
+
+**Phase 1 — Scrape (one-time, run by `pnpm run scrape:catalog`):**
+- Tavily fan-out across all 6 categories
+- Gemini parses snippets → structured `Catalog[]`
+- Save to `data/fixtures/german_market_catalog.json`
+- Includes scrape timestamp + every source URL
+- Re-run anytime market data feels stale
+
+**Phase 2 — Runtime (every installer click):**
+- Read cached `german_market_catalog.json`
+- Compose-from-market sizer picks NPV-optimal config from cached catalog
+- Show "Live German solar market — scraped {timestamp} via Tavily" badge
+- No network call, no failure mode, instant response
+
+### Manual panel layout editing (NEW — installer flexibility)
+
+The AI can't see chimneys/skylights/vents from satellite. Installer needs to edit:
+- Cesium panel overlay shows AI-placed panels (from Google `solarPanels[]` or our derived layout)
+- **Click panel → remove it** (e.g. obstruction conflict)
+- **Click empty roof spot → add panel** (snaps to nearest valid position)
+- Panel count + system kWp + savings/payback recompute live
+- Each removed panel marked in the data: `{lat, lng, status: "removed", reason: "obstruction"}`
+
+### ROI-optimal sizing (CORE rule — overrides demand × 1.1)
+
+Replace `Math.min(panelFitMax, panelDemand × 1.1)` with NPV maximizer:
+```
+panelCount = argmax_N (annualSavings(N) × 25_yr − totalCost(N))
+  where N ∈ [1, panelFitMax]
+  annualSavings = selfConsumed(N) × €0.32 + exported(N) × €0.08
+  totalCost = N × cataloged €/panel + battery + (heatPump if needed)
+```
+Stops adding panels when next panel's marginal NPV goes negative. Always bounded by physical roof fit. The demo punchline becomes: *"Verdict picks N panels because that's the size that maximizes 25-year savings minus cost given Berlin's €0.32 retail / €0.08 feed-in spread on this specific roof."*
+
 ### File-by-file change list
 
 **SUBTRACT — Homeowner side (~30 min)**
@@ -84,18 +121,34 @@ HOMEOWNER:
 - `app/api/leads/route.ts` (POST) — already attaches `roofSegments`. Add: `solarPanels[]` from Google `buildingInsights`, demand profile, per-segment `annualSunshineHours`. Drop the `bomVariants` field from the payload — installer side will build them.
 - `app/api/roof-facts/route.ts` — also return `solarPanels[]` (slice top 200, sorted by `yearlyEnergyDcKwh` desc).
 
-**ADD — Installer side market research (~3 hours, the meat)**
-- `lib/api/tavily-research.ts` — new. 5- or 6-query parallel fan-out (skip wallbox if !EV, skip HP if !HP). 4s timeout per call. Returns `RawSearchResult[]` with `{query, snippet, url, title}`.
-- `lib/api/gemini-extract.ts` — new. Sends Tavily snippets to Gemini with a Zod schema (`{brand, model, watts?, kwh?, kw?, eurEx, currency, source_url}`). Returns `Catalog[]` per category.
-- `lib/sizing/compose-from-market.ts` — new. Inputs: catalog + roof segments + demand profile + EV/HP flags. Output: 3 `Variant`s with NPV-optimal panel count (walks N=1..panelFitMax, picks max 25-yr NPV given the live €/kWp from catalog and German €0.32 retail / €0.08 feed-in spread). Each Variant carries `sourceUrls: {panel: url, inverter: url, ...}`.
-- `app/installer/[id]/page.tsx` — new. Replaces the marketplace-only flow. Direct deep-link per lead.
+**ADD — One-time scrape pipeline (~60 min)**
+- `scripts/scrape-catalog.ts` — new. Runs Tavily fan-out (6 queries, parallel, 4s each), pipes to Gemini for Zod-validated extraction, writes `data/fixtures/german_market_catalog.json`. Add `pnpm run scrape:catalog` script.
+- `lib/api/tavily-research.ts` — new. Pure Tavily client (no caching). Used only by the scrape script.
+- `lib/api/gemini-extract.ts` — new. Pure Gemini client for catalog parsing (no caching). Used only by the scrape script.
+- `data/schema.ts` — add `MarketCatalog` Zod schema: `{ scrapedAt, panels: CatalogItem[], inverters: CatalogItem[], batteries: CatalogItem[], wallboxes: CatalogItem[], heatPumps: CatalogItem[], mounts: CatalogItem[] }` where `CatalogItem = { brand, model, kw?|kwh?|wp?, eurEx, sourceUrl, sourceTitle }`.
+- `data/fixtures/german_market_catalog.json` — generated, committed to repo. Contains real Tavily-scraped market data with timestamps + source URLs.
+
+**ADD — Runtime composer & ROI sizer (~90 min)**
+- `lib/sizing/compose-from-market.ts` — new. Inputs: cached catalog + roof segments + demand + (battery/HP/EV three-state flags). Output: 3 `Variant`s. Three-state handling: "yes" includes in all 3, "no" excludes from all 3, "idk" includes in 2 of 3 so homeowner can compare.
+- `lib/sizing/roi-optimizer.ts` — new. NPV maximizer over panel count. Walks N from 1 to `panelFitMax`, computes 25-year savings minus cost, picks argmax. Sunshine-aware yield via `RoofSegment.annualSunshineHours`.
+- `lib/sizing/__tests__/roi_optimizer.test.ts` — new. Tests: small roof (capped by fit), big roof + low demand (capped by NPV plateau), big roof + high demand (capped by demand satiation).
+- `app/installer/[id]/page.tsx` — new direct-deep-link route per lead.
+
+**ADD — Installer UI rewrite (~75 min)**
 - `components/installer/InstallerLeadDetail.tsx` — rewrite:
-  - Top section: AI-prefetched technical card (roof area, segment count, dominant azimuth, median sunshine hours, derived annual kWh) — proves the AI pre-work is real.
-  - Middle: big primary CTA "Research market & build offer".
-  - During research: 5/6 spinners → ✓ → live source-URL chips populate.
-  - After research: 3 variant cards. Each BoM line shows a small source-URL chip linking to the page Tavily found it on.
-  - Bottom: Accept lead (unlocks customer details) → Send Offer.
-- `components/installer/SourceUrlChip.tsx` — new. Tiny pill: favicon + truncated host. Click opens in new tab.
+  - Top: AI-prefetched technical card (roof area, segment count, dominant azimuth, median sunshine, derived annual kWh)
+  - Middle: 3 variant cards composed from cached catalog (instant, no spinner — feels snappy)
+  - Each BoM line: small source-URL chip → opens the URL Tavily found it on
+  - Footer badge: "Live German solar market — scraped {timestamp} via Tavily — N sources"
+  - Cesium overlay shows panel polygons (see panel-edit section below)
+- `components/installer/SourceUrlChip.tsx` — new. Pill: favicon + truncated host. Opens new tab.
+
+**ADD — Cesium panel overlay + manual edit (~90 min, the WOW)**
+- `components/installer/PanelOverlayCesium.tsx` — new. Renders panel polygons on the photoreal mesh. Uses Google `solarPanels[]` (slice to N), or derived rectangle layout per segment as fallback.
+- Click handler on each panel entity → remove panel, mark in `panelEdits` state, recompute systemKwp + savings live
+- Click empty roof spot → snap to nearest valid panel position, add to layout
+- Color panels by MPPT string (matches `SegmentBreakdown.tsx` colors)
+- Toggle pill (top-right of Cesium view): "Show panels / Hide panels"
 
 **KEEP**
 - `components/homeowner/CesiumRoofView*.tsx` — same building, same visual anchor. Prop interface unchanged.
