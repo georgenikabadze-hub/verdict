@@ -82,11 +82,12 @@ const round1 = (n: number): number => Math.round(n * 10) / 10;
  * value when provided, otherwise back-derives from the monthly bill and
  * the German residential €/kWh average.
  */
-function deriveAnnualKwh(intake: Intake): number {
+function deriveAnnualKwh(intake: Intake, eurPerKwhOverride?: number): number {
   if (typeof intake.annualKwh === "number" && intake.annualKwh > 0) {
     return intake.annualKwh;
   }
-  const annual = (intake.monthlyBillEur * 12) / EUR_PER_KWH_RESIDENTIAL;
+  const eurPerKwh = eurPerKwhOverride ?? EUR_PER_KWH_RESIDENTIAL;
+  const annual = (intake.monthlyBillEur * 12) / eurPerKwh;
   return Math.max(0, annual);
 }
 
@@ -260,6 +261,7 @@ interface BuildVariantInput {
   annualYieldKwh: number;
   heatPumpKwBaseline: number;
   shouldOfferHp: boolean;
+  eurPerKwh: number;
 }
 
 function buildVariant(input: BuildVariantInput): Variant {
@@ -274,6 +276,7 @@ function buildVariant(input: BuildVariantInput): Variant {
     annualYieldKwh,
     heatPumpKwBaseline,
     shouldOfferHp,
+    eurPerKwh,
   } = input;
 
   const batteryKwhRaw = baselineBatteryKwh * cfg.batteryFactor;
@@ -347,7 +350,7 @@ function buildVariant(input: BuildVariantInput): Variant {
   );
   const fedInKwh = Math.max(0, annualYieldKwh - selfConsumedKwh);
   const annualSavingsEur =
-    selfConsumedKwh * EUR_PER_KWH_RESIDENTIAL +
+    selfConsumedKwh * eurPerKwh +
     fedInKwh * FEED_IN_EUR_PER_KWH;
   const monthlySavingsEur = round0(annualSavingsEur / 12);
   const paybackYears =
@@ -439,8 +442,9 @@ function validateRules(args: {
 export function sizeQuote(
   intake: Intake,
   roofSegments: RoofSegment[],
+  eurPerKwhOverride?: number,
 ): SizingResult {
-  const annualKwhRaw = deriveAnnualKwh(intake);
+  const annualKwhRaw = deriveAnnualKwh(intake, eurPerKwhOverride);
   const annualKwh = round0(annualKwhRaw);
   const dailyKwh = annualKwhRaw / 365;
 
@@ -483,6 +487,7 @@ export function sizeQuote(
     annualYieldKwh,
     heatPumpKwBaseline,
     shouldOfferHp,
+    eurPerKwh: eurPerKwhOverride ?? EUR_PER_KWH_RESIDENTIAL,
   };
 
   const variants: [Variant, Variant, Variant] = [
@@ -544,8 +549,9 @@ export function sizeQuote(
 export async function sizeQuoteWithRationale(
   intake: Intake,
   roofSegments: RoofSegment[],
+  eurPerKwhOverride?: number,
 ): Promise<SizingResult> {
-  const base = sizeQuote(intake, roofSegments);
+  const base = sizeQuote(intake, roofSegments, eurPerKwhOverride);
 
   const enriched = await Promise.all(
     base.variants.map(async (variant) => {

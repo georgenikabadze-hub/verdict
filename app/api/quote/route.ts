@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getResidentialTariff } from "@/lib/api/tavily";
 import { sizeQuote } from "@/lib/sizing/calculate";
 import type { Intake, RoofSegment } from "@/lib/contracts";
 
@@ -51,6 +52,15 @@ async function getRoofSegments(lat: number, lng: number): Promise<RoofSegment[]>
   }
 }
 
+function extractPostcode(address: string): string | undefined {
+  return address.match(/\b\d{5}\b/)?.[0];
+}
+
+function extractCity(address: string): string | undefined {
+  const match = address.match(/\b\d{5}\s+([^,]+)/);
+  return match?.[1]?.trim();
+}
+
 export async function GET(req: NextRequest) {
   const t0 = Date.now();
   const address = req.nextUrl.searchParams.get("address");
@@ -89,12 +99,20 @@ export async function GET(req: NextRequest) {
     goal: (req.nextUrl.searchParams.get("goal") ?? "lower_bill") as Intake["goal"],
   };
 
+  const tariff = await getResidentialTariff({
+    lat: geo.lat,
+    lng: geo.lng,
+    postcode: extractPostcode(geo.formattedAddress),
+    city: extractCity(geo.formattedAddress),
+  });
+
   // 4. Size
   const sizing = sizeQuote(
     intake,
     roofSegments.length > 0
       ? roofSegments
       : [{ pitchDegrees: 35, azimuthDegrees: 180, areaMeters2: 60, annualSunshineHours: 1100 }],
+    tariff.eurPerKwh,
   );
 
   return NextResponse.json(
@@ -104,6 +122,7 @@ export async function GET(req: NextRequest) {
       address: geo.formattedAddress,
       coordinates: { lat: geo.lat, lng: geo.lng },
       roofSegmentsFromSolarApi: roofSegments.length,
+      tariff,
       intake,
       sizing,
     },

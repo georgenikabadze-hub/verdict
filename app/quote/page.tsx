@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { getResidentialTariff } from "@/lib/api/tavily";
 import { sizeQuoteWithRationale } from "@/lib/sizing/calculate";
 import { VariantCardStack } from "@/components/homeowner/VariantCardStack";
 import { SendToInstaller } from "@/components/homeowner/SendToInstaller";
@@ -63,6 +64,23 @@ async function getRoofSegments(lat: number, lng: number, key: string): Promise<R
   }
 }
 
+function extractPostcode(address: string): string | undefined {
+  return address.match(/\b\d{5}\b/)?.[0];
+}
+
+function extractCity(address: string): string | undefined {
+  const match = address.match(/\b\d{5}\s+([^,]+)/);
+  return match?.[1]?.trim();
+}
+
+function formatTariffLine(tariff: Awaited<ReturnType<typeof getResidentialTariff>>): string {
+  const value = `€${tariff.eurPerKwh.toFixed(2)}/kWh`;
+  if (tariff.source === "tavily-live") {
+    return `Tariff source: Tavily live (${value}) · ${tariff.query}`;
+  }
+  return `Tariff: default ${value}`;
+}
+
 export default async function QuotePage({
   searchParams,
 }: {
@@ -93,9 +111,9 @@ export default async function QuotePage({
     areaMeters2: 60,
     annualSunshineHours: 1100,
   };
-  const segments = geo
-    ? await getRoofSegments(geo.lat, geo.lng, key)
-    : [fallbackSegment];
+  const measuredSegments = geo ? await getRoofSegments(geo.lat, geo.lng, key) : [];
+  const hasLiveSolarMeasurement = measuredSegments.length > 0;
+  const segmentsForSizing = hasLiveSolarMeasurement ? measuredSegments : [fallbackSegment];
 
   const intake: Intake = {
     address: geo?.formattedAddress ?? params.address,
@@ -107,9 +125,14 @@ export default async function QuotePage({
     goal: (params.goal ?? "lower_bill") as Intake["goal"],
   };
 
-  const sizing = await sizeQuoteWithRationale(intake, segments.length > 0 ? segments : [fallbackSegment]);
+  const tariff = await getResidentialTariff({
+    lat: intake.lat,
+    lng: intake.lng,
+    postcode: extractPostcode(intake.address),
+    city: extractCity(intake.address),
+  });
 
-  const liveOrCached = segments.length > 0 ? "live" : "cached";
+  const sizing = await sizeQuoteWithRationale(intake, segmentsForSizing, tariff.eurPerKwh);
 
   return (
     <main className="relative min-h-dvh bg-[#0A0E1A] text-[#F7F8FA] flex flex-col">
@@ -124,7 +147,7 @@ export default async function QuotePage({
           <div className="flex items-center gap-2 text-xs">
             <span className="flex items-center gap-1.5 rounded border border-[#62E6A7]/40 bg-[#0A0E1A] px-2 py-0.5 text-[#62E6A7]">
               <span className="h-1.5 w-1.5 rounded-md bg-[#62E6A7]" />
-              {liveOrCached === "live" ? "Measured live" : "Estimated"}
+              {hasLiveSolarMeasurement ? "Measured live" : "Estimated (Solar API has no coverage here)"}
             </span>
             <span className="text-[#5B6470]">·</span>
             <span className="text-[#9BA3AF] truncate">{intake.address}</span>
@@ -133,15 +156,28 @@ export default async function QuotePage({
             Three Reonic-grounded options for your home.
           </h1>
           <p className="text-sm text-[#9BA3AF]">
-            {sizing.systemKwp} kWp system &middot; {sizing.annualKwh.toLocaleString()} kWh/yr demand &middot; {segments.length} roof face{segments.length !== 1 ? "s" : ""} measured
+            {sizing.systemKwp} kWp system &middot; {sizing.annualKwh.toLocaleString()} kWh/yr demand &middot; {measuredSegments.length} roof face{measuredSegments.length !== 1 ? "s" : ""} measured
+          </p>
+          <p className="text-xs text-[#9BA3AF]">
+            {formatTariffLine(tariff)}
           </p>
         </header>
 
         {/* The three variants */}
         <VariantCardStack variants={sizing.variants} />
 
-        {/* Send to installer */}
-        <SendToInstaller leadId={`q-${Date.now().toString(36)}`} />
+        {/* Send to installer — POSTs the real lead with this homeowner's intake + live roof segments */}
+        <SendToInstaller
+          address={intake.address}
+          coords={{ lat: intake.lat, lng: intake.lng }}
+          intake={{
+            monthlyBillEur: intake.monthlyBillEur,
+            ev: intake.ev,
+            heating: intake.heating,
+            goal: intake.goal,
+          }}
+          roofSegments={segmentsForSizing}
+        />
 
         {/* Spouse-share viral moment */}
         <SpouseShareCard

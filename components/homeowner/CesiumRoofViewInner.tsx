@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { CESIUM_BASE_URL, tilesetUrl } from "@/lib/cesium/config";
 import { RoofMap3D } from "./RoofMap3D";
 
@@ -21,38 +21,282 @@ if (typeof window !== "undefined") {
   (window as any).CESIUM_BASE_URL = CESIUM_BASE_URL;
 }
 
-// 5-metre buffer around the Solar API bounding box so eaves, gutters, and
-// the patch of garden the homeowner uses for orientation don't get amputated.
-const CLIP_BUFFER_METERS = 5;
+// Default buffer around the OSM footprint when the selection is confident.
+// A 15 m tree at low Berlin winter-sun elevation (~15°) casts a ~55 m shadow,
+// so solar realism needs nearby vegetation visible. Keeping trees within
+// ~20 m preserves shade context even though the previous 7 m buffer better
+// matched a GLB-extracted house aesthetic.
+const CLIP_BUFFER_METERS = 20;
+
+// When the OSM-pick confidence is low (the chosen polygon barely beat the
+// runner-up, or the geocoded point sits between two adjacent buildings) we
+// widen further so the view does not lose vegetation that can cast meaningful
+// shade. The earlier 10 m value kept a tighter isolated-house look, but solar
+// context wins over the extracted-GLB aesthetic.
+const LOW_CONFIDENCE_BUFFER_METERS = 30;
+const CIRCLE_FALLBACK_RADIUS_M = 25;
+const CIRCLE_FALLBACK_SIDES = 24;
+
+// WGS84 height=0 sits well below the actual ground in most populated places —
+// Berlin is ~35 m above the ellipsoid, the Ruhr ~50 m, the Alps anywhere
+// from 400 m up. We sample the real ground height off the Photoreal tileset
+// after it loads (`scene.sampleHeightMostDetailed`); this constant is only
+// used as a first-paint fallback before the sample resolves.
+const DEFAULT_GROUND_HEIGHT_M = 38;
+const CAMERA_NEAR_PLANE_M = 0.1;
+const MINIMUM_ZOOM_DISTANCE_M = 10;
+
+/**
+ * Ray-pick the ground height at (lng, lat) against whatever's in the scene
+ * (i.e. the Photoreal 3D Tileset). Returns DEFAULT_GROUND_HEIGHT_M when the
+ * sample isn't available yet — typical when the tileset's local LOD hasn't
+ * streamed in near the target. Caller should re-sample after a beat in that
+ * case.
+ *
+ * Why we need this: lookAtTransform places the camera relative to a Cartesian3
+ * target. If the target is at WGS84 height 0 and the actual ground is +38 m
+ * (Berlin) or higher, every preset that isn't straight-down ends up putting
+ * the camera at or below ground level — the building disappears into the
+ * mesh, which is how Falkenried 9 was rendering before this fix.
+ */
+async function sampleGroundHeight(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  Cesium: any,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  viewer: any,
+  lng: number,
+  lat: number,
+): Promise<number> {
+  try {
+    if (typeof viewer?.scene?.sampleHeightMostDetailed !== "function") {
+      // eslint-disable-next-line no-console
+      console.warn("[ground] sampleHeightMostDetailed missing");
+      return DEFAULT_GROUND_HEIGHT_M;
+    }
+    const positions = [Cesium.Cartographic.fromDegrees(lng, lat)];
+    const sampled = await viewer.scene.sampleHeightMostDetailed(positions);
+    const h = sampled?.[0]?.height;
+    // eslint-disable-next-line no-console
+    console.log(`[ground] sample at ${lat},${lng} →`, h);
+    if (Number.isFinite(h)) return h;
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn("[ground] sample threw", err);
+  }
+  return DEFAULT_GROUND_HEIGHT_M;
+}
 
 interface BoundingBox {
   sw: { latitude: number; longitude: number };
   ne: { latitude: number; longitude: number };
 }
 
+interface RoofSegmentLite {
+  pitchDegrees?: number;
+  azimuthDegrees?: number;
+  areaMeters2?: number;
+  annualSunshineHours?: number;
+}
+
 interface RoofFactsResponse {
   boundingBox?: BoundingBox;
+  segments?: RoofSegmentLite[];
+  totalAreaM2?: number;
+}
+
+interface OsmLatLng {
+  lat: number;
+  lng: number;
+}
+
+interface FootprintResponse {
+  footprint: {
+    polygon: OsmLatLng[];
+    centroid: OsmLatLng;
+    areaM2: number;
+    lengthM: number;
+    widthM: number;
+    source: "contains" | "scored" | "fallback";
+    confidence: "high" | "low";
+  } | null;
+}
+
+export interface RoofDimensions {
+  /** Approx footprint length (longest side of axis-aligned bbox). */
+  lengthM: number;
+  widthM: number;
+  footprintAreaM2: number;
+  totalRoofAreaM2?: number;
+  roofPitchDeg?: number;
+  source: "osm" | "solar-bbox" | "circle";
+  target?: OsmLatLng;
 }
 
 /**
- * Convert a metre offset into a degree delta at the given latitude. Latitude
- * degrees are ~111,320 m everywhere; longitude degrees shrink with cos(lat).
- * Good enough for a few-metre buffer around a single building.
+ * Force the polygon into counter-clockwise winding in local projected metres.
+ *
+ * Cesium 1.140 computes polygon clipping with a ray-crossing signed-distance
+ * texture, so winding is not what decides the keep/discard side there. We
+ * still canonicalise the ring before buffering because OSM ways arrive in
+ * either direction and a projected signed area is the least surprising source
+ * of truth for future geometry work.
  */
-function metersToLatLngDelta(
-  meters: number,
-  refLat: number,
-): { dLat: number; dLng: number } {
-  const dLat = meters / 111_320;
-  const dLng = meters / (111_320 * Math.cos((refLat * Math.PI) / 180));
-  return { dLat, dLng };
+function ensureCCW(poly: OsmLatLng[]): OsmLatLng[] {
+  if (poly.length < 3) return poly;
+  const cLat = poly.reduce((a, p) => a + p.lat, 0) / poly.length;
+  const cLng = poly.reduce((a, p) => a + p.lng, 0) / poly.length;
+  const cosLat = Math.cos((cLat * Math.PI) / 180);
+  let signedArea2 = 0;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = (poly[i].lng - cLng) * 111_320 * cosLat;
+    const yi = (poly[i].lat - cLat) * 111_320;
+    const xj = (poly[j].lng - cLng) * 111_320 * cosLat;
+    const yj = (poly[j].lat - cLat) * 111_320;
+    signedArea2 += xj * yi - xi * yj;
+  }
+  return signedArea2 < 0 ? [...poly].reverse() : poly;
 }
 
 /**
- * Fetch the building's bounding box from /api/roof-facts and apply a
- * ClippingPolygonCollection that hides everything outside it. Silently
- * no-ops when the API has no coverage — the full neighbourhood mesh
- * stays visible as a graceful fallback.
+ * Push every polygon vertex outward from the centroid by `meters`. Crude
+ * (a real Minkowski sum would be edge-aware), but for a small uniform buffer
+ * around a single building it's visually indistinguishable.
+ */
+function expandPolygon(poly: OsmLatLng[], meters: number): OsmLatLng[] {
+  if (poly.length === 0) return poly;
+  const cLat = poly.reduce((a, p) => a + p.lat, 0) / poly.length;
+  const cLng = poly.reduce((a, p) => a + p.lng, 0) / poly.length;
+  const cosLat = Math.cos((cLat * Math.PI) / 180);
+  return poly.map((p) => {
+    const dLatM = (p.lat - cLat) * 111_320;
+    const dLngM = (p.lng - cLng) * 111_320 * cosLat;
+    const distM = Math.hypot(dLatM, dLngM);
+    if (distM < 0.05) return p;
+    const factor = (distM + meters) / distM;
+    return {
+      lat: cLat + (p.lat - cLat) * factor,
+      lng: cLng + (p.lng - cLng) * factor,
+    };
+  });
+}
+
+function isUsableFootprint(
+  footprint: FootprintResponse["footprint"],
+): footprint is NonNullable<FootprintResponse["footprint"]> {
+  if (!footprint || footprint.polygon.length < 3) return false;
+  return (
+    Number.isFinite(footprint.areaM2) &&
+    footprint.areaM2 > 1 &&
+    Number.isFinite(footprint.lengthM) &&
+    footprint.lengthM > 0 &&
+    Number.isFinite(footprint.widthM) &&
+    footprint.widthM > 0 &&
+    footprint.polygon.every(
+      (p) => Number.isFinite(p.lat) && Number.isFinite(p.lng),
+    )
+  );
+}
+
+function createCirclePolygon(
+  center: OsmLatLng,
+  radiusM: number,
+  sides = CIRCLE_FALLBACK_SIDES,
+): OsmLatLng[] {
+  const cosLat = Math.cos((center.lat * Math.PI) / 180);
+  return Array.from({ length: sides }, (_, i) => {
+    const angle = (i / sides) * Math.PI * 2;
+    const dLngM = Math.cos(angle) * radiusM;
+    const dLatM = Math.sin(angle) * radiusM;
+    return {
+      lat: center.lat + dLatM / 111_320,
+      lng: center.lng + dLngM / (111_320 * cosLat),
+    };
+  });
+}
+
+function createBufferedBoundingBoxPolygon(
+  boundingBox: BoundingBox,
+  bufferM: number,
+): {
+  center: OsmLatLng;
+  polygon: OsmLatLng[];
+  lengthM: number;
+  widthM: number;
+  areaM2: number;
+} | null {
+  const south = Math.min(boundingBox.sw.latitude, boundingBox.ne.latitude);
+  const north = Math.max(boundingBox.sw.latitude, boundingBox.ne.latitude);
+  const west = Math.min(boundingBox.sw.longitude, boundingBox.ne.longitude);
+  const east = Math.max(boundingBox.sw.longitude, boundingBox.ne.longitude);
+  if (![south, north, west, east].every(Number.isFinite)) return null;
+  if (north <= south || east <= west) return null;
+
+  const center = {
+    lat: (south + north) / 2,
+    lng: (west + east) / 2,
+  };
+  const cosLat = Math.cos((center.lat * Math.PI) / 180);
+  if (!Number.isFinite(cosLat) || Math.abs(cosLat) < 0.0001) return null;
+
+  const heightM = (north - south) * 111_320;
+  const widthM = (east - west) * 111_320 * cosLat;
+  if (heightM <= 0 || widthM <= 0) return null;
+
+  const latBuffer = bufferM / 111_320;
+  const lngBuffer = bufferM / (111_320 * cosLat);
+  const bufferedSouth = south - latBuffer;
+  const bufferedNorth = north + latBuffer;
+  const bufferedWest = west - lngBuffer;
+  const bufferedEast = east + lngBuffer;
+
+  return {
+    center,
+    polygon: [
+      { lat: bufferedSouth, lng: bufferedWest },
+      { lat: bufferedSouth, lng: bufferedEast },
+      { lat: bufferedNorth, lng: bufferedEast },
+      { lat: bufferedNorth, lng: bufferedWest },
+    ],
+    lengthM: Math.max(widthM, heightM),
+    widthM: Math.min(widthM, heightM),
+    areaM2: widthM * heightM,
+  };
+}
+
+function applyClipPolygon(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  Cesium: any,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  tileset: any,
+  polygonPoints: OsmLatLng[],
+): void {
+  const flat: number[] = [];
+  for (const p of polygonPoints) {
+    flat.push(p.lng, p.lat);
+  }
+  const positions = Cesium.Cartesian3.fromDegreesArray(flat);
+  const polygon = new Cesium.ClippingPolygon({ positions });
+  tileset.clippingPolygons = new Cesium.ClippingPolygonCollection({
+    polygons: [polygon],
+    // Cesium's signed-distance shader treats the polygon interior as the
+    // negative side. `inverse: true` discards everything outside the polygon.
+    inverse: true,
+  });
+}
+
+/**
+ * Fetch the building footprint (OSM Overpass, server-proxied) and apply a
+ * ClippingPolygonCollection that keeps only what's inside it. If OSM has no
+ * usable nearby building, Solar's findClosest bounding box snaps the camera
+ * and clip to the building Google found. If both sources miss, we fall back
+ * to a tight circle around the geocode.
+ *
+ * Why two sources: OSM is the authoritative cadastral outline so the clip
+ * matches the real building shape. Solar's bbox is looser, but it is still a
+ * better target than a road-centered geocode when OSM has no polygon.
+ *
+ * Returns the dimensions extracted from the chosen source so the parent can
+ * render an overlay without re-fetching.
  */
 async function applyBuildingClip(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -60,53 +304,136 @@ async function applyBuildingClip(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   tileset: any,
   coords: { lat: number; lng: number },
-): Promise<void> {
-  try {
-    const res = await fetch(
-      `/api/roof-facts?lat=${coords.lat}&lng=${coords.lng}`,
-      { cache: "no-store" },
-    );
-    if (!res.ok) return;
-    const data = (await res.json()) as RoofFactsResponse;
-    const bbox = data.boundingBox;
-    if (
-      !bbox ||
-      !Number.isFinite(bbox.sw?.latitude) ||
-      !Number.isFinite(bbox.sw?.longitude) ||
-      !Number.isFinite(bbox.ne?.latitude) ||
-      !Number.isFinite(bbox.ne?.longitude)
-    ) {
-      // No coverage / fixture branch — leave the neighbourhood visible.
-      return;
+): Promise<RoofDimensions | null> {
+  // Fetch both sources in parallel. OSM gives polygon + length/width; Solar
+  // gives roof area and per-segment pitch.
+  const [footprintRes, factsRes] = await Promise.allSettled([
+    fetch(`/api/footprint?lat=${coords.lat}&lng=${coords.lng}`, {
+      cache: "no-store",
+    }),
+    fetch(`/api/roof-facts?lat=${coords.lat}&lng=${coords.lng}`, {
+      cache: "no-store",
+    }),
+  ]);
+
+  let osmFootprint: FootprintResponse["footprint"] | null = null;
+  if (footprintRes.status === "fulfilled" && footprintRes.value.ok) {
+    try {
+      const data = (await footprintRes.value.json()) as FootprintResponse;
+      osmFootprint = data.footprint;
+    } catch {
+      osmFootprint = null;
     }
-
-    const refLat = (bbox.sw.latitude + bbox.ne.latitude) / 2;
-    const { dLat, dLng } = metersToLatLngDelta(CLIP_BUFFER_METERS, refLat);
-
-    const swLat = bbox.sw.latitude - dLat;
-    const swLng = bbox.sw.longitude - dLng;
-    const neLat = bbox.ne.latitude + dLat;
-    const neLng = bbox.ne.longitude + dLng;
-
-    // Counter-clockwise quad (SW → SE → NE → NW). Cesium expects positions
-    // in degrees as [lng, lat, lng, lat, ...]. With `inverse: false` the
-    // collection clips OUTSIDE this polygon — keeping the building.
-    const positions = Cesium.Cartesian3.fromDegreesArray([
-      swLng, swLat,
-      neLng, swLat,
-      neLng, neLat,
-      swLng, neLat,
-    ]);
-
-    const polygon = new Cesium.ClippingPolygon({ positions });
-    tileset.clippingPolygons = new Cesium.ClippingPolygonCollection({
-      polygons: [polygon],
-      inverse: false,
-    });
-  } catch {
-    // Network blip / aborted fetch — fall back to no clipping.
   }
+
+  let roofFacts: RoofFactsResponse | null = null;
+  if (factsRes.status === "fulfilled" && factsRes.value.ok) {
+    try {
+      roofFacts = (await factsRes.value.json()) as RoofFactsResponse;
+    } catch {
+      roofFacts = null;
+    }
+  }
+
+  // Roof pitch: median of segment pitches when we have several, else first.
+  const pitches = (roofFacts?.segments ?? [])
+    .map((s) => s.pitchDegrees)
+    .filter((p): p is number => Number.isFinite(p));
+  const roofPitchDeg =
+    pitches.length === 0
+      ? undefined
+      : pitches.length === 1
+        ? pitches[0]
+        : [...pitches].sort((a, b) => a - b)[Math.floor(pitches.length / 2)];
+
+  // ---- Pick the clip source: OSM polygon, Solar bbox, else geocode circle ----
+  if (isUsableFootprint(osmFootprint)) {
+    const buffer =
+      osmFootprint.confidence === "low"
+        ? LOW_CONFIDENCE_BUFFER_METERS
+        : CLIP_BUFFER_METERS;
+    const ccw = ensureCCW(osmFootprint.polygon);
+    const expanded = expandPolygon(ccw, buffer);
+    try {
+      applyClipPolygon(Cesium, tileset, expanded);
+      return {
+        lengthM: osmFootprint.lengthM,
+        widthM: osmFootprint.widthM,
+        footprintAreaM2: osmFootprint.areaM2,
+        totalRoofAreaM2: roofFacts?.totalAreaM2,
+        roofPitchDeg,
+        source: "osm",
+      };
+    } catch {
+      // ClippingPolygon construction can throw on degenerate / self-
+      // intersecting OSM data; fall through to the Solar bbox snap.
+    }
+  }
+
+  const solarBox = roofFacts?.boundingBox
+    ? createBufferedBoundingBoxPolygon(roofFacts.boundingBox, 5)
+    : null;
+  if (solarBox) {
+    try {
+      applyClipPolygon(Cesium, tileset, solarBox.polygon);
+      return {
+        lengthM: solarBox.lengthM,
+        widthM: solarBox.widthM,
+        footprintAreaM2: solarBox.areaM2,
+        totalRoofAreaM2: roofFacts?.totalAreaM2,
+        roofPitchDeg,
+        source: "solar-bbox",
+        target: solarBox.center,
+      };
+    } catch {
+      // If Cesium rejects the rectangle, keep the existing last-resort
+      // geocode-centered fallback instead of failing the whole scene.
+    }
+  }
+
+  try {
+    applyClipPolygon(
+      Cesium,
+      tileset,
+      createCirclePolygon(coords, CIRCLE_FALLBACK_RADIUS_M),
+    );
+  } catch {
+    return null;
+  }
+
+  return {
+    lengthM: CIRCLE_FALLBACK_RADIUS_M * 2,
+    widthM: CIRCLE_FALLBACK_RADIUS_M * 2,
+    footprintAreaM2: Math.PI * CIRCLE_FALLBACK_RADIUS_M ** 2,
+    totalRoofAreaM2: roofFacts?.totalAreaM2,
+    roofPitchDeg,
+    source: "circle",
+  };
 }
+
+interface CameraPreset {
+  id: string;
+  label: string;
+  /** degrees */
+  heading: number;
+  /** degrees, negative looks down */
+  pitch: number;
+  /** metres from target */
+  range: number;
+}
+
+// Preset framings. Headings assume north = 0 (standard Cesium convention).
+// "Front" is south-facing because solar-relevant facades in the northern
+// hemisphere are the south ones — that's what the user actually cares about.
+const CAMERA_PRESETS: CameraPreset[] = [
+  { id: "top",      label: "Top",        heading: 0,   pitch: -90, range: 130 },
+  { id: "front",    label: "Front",      heading: 180, pitch: -15, range: 90 },
+  { id: "side",     label: "Side",       heading: 90,  pitch: -15, range: 90 },
+  { id: "oblique",  label: "Oblique",    heading: 45,  pitch: -45, range: 110 },
+  { id: "roof",     label: "Roof angle", heading: 0,   pitch: -60, range: 90 },
+];
+
+const DEFAULT_PRESET = CAMERA_PRESETS[3]; // oblique
 
 export default function CesiumRoofViewInner({ coords, address }: Props) {
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
@@ -115,8 +442,21 @@ export default function CesiumRoofViewInner({ coords, address }: Props) {
   // create two viewers fighting over the same canvas.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const viewerRef = useRef<any>(null);
+  // Cached lookAtTransform target (ECEF Cartesian3) + Cesium namespace so
+  // preset buttons can re-aim the camera without re-importing cesium each
+  // click. Both populated on viewer mount and refreshed on coords change.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const targetRef = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const cesiumRef = useRef<any>(null);
 
   const [status, setStatus] = useState<Status>("loading");
+  const [dimensions, setDimensions] = useState<RoofDimensions | null>(null);
+  const [activePreset, setActivePreset] = useState<string>(DEFAULT_PRESET.id);
+  // Dimensions panel is a disclosure — open by default so the numbers are
+  // discoverable on first paint, but users can collapse it to a single-line
+  // pill when they want the 3D mesh to breathe.
+  const [dimsOpen, setDimsOpen] = useState(true);
 
   // -------------------------------------------------------------------------
   // Mount the viewer once, then re-fly to new coords on every coords change.
@@ -136,6 +476,7 @@ export default function CesiumRoofViewInner({ coords, address }: Props) {
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const Cesium: any = await import("cesium");
+        cesiumRef.current = Cesium;
 
         // Inject Cesium widgets CSS once — served from /public/cesium/Widgets/
         // by the postinstall hook. Importing the .css file from node_modules
@@ -184,11 +525,35 @@ export default function CesiumRoofViewInner({ coords, address }: Props) {
 
         // Hide the blue WGS84 globe — only the photoreal tileset should render.
         viewer.scene.globe.show = false;
-        // Transparent background fits the dark Verdict shell.
-        viewer.scene.backgroundColor = Cesium.Color.fromCssColorString("#0A0E1A");
-        // The default sky gradient looks blue/cloudy; kill it for the hero pane.
+        viewer.scene.camera.frustum.near = CAMERA_NEAR_PLANE_M;
+        if ("logarithmicDepthBuffer" in viewer.scene) {
+          viewer.scene.logarithmicDepthBuffer = true;
+        }
+        // Pure black so the clipped building reads as an isolated GLB-style
+        // object. The dark-but-tinted Verdict bg leaks colour around the mesh
+        // edges — the GLB references the user loves are all on true black.
+        viewer.scene.backgroundColor = Cesium.Color.BLACK;
+        // The default sky gradient looks blue/cloudy; kill everything that
+        // implies "outdoors" so the scene reads as a studio extraction.
         if (viewer.scene.skyAtmosphere) viewer.scene.skyAtmosphere.show = false;
         if (viewer.scene.skyBox) viewer.scene.skyBox.show = false;
+        if (viewer.scene.fog) viewer.scene.fog.enabled = false;
+        if (viewer.scene.globe) viewer.scene.globe.showGroundAtmosphere = false;
+        // Single warm directional "studio" light. Cesium's default SunLight
+        // tracks real time-of-day; we want a fixed, flattering angle so the
+        // mesh always reads the same way regardless of when the demo runs.
+        try {
+          viewer.scene.light = new Cesium.DirectionalLight({
+            direction: Cesium.Cartesian3.normalize(
+              new Cesium.Cartesian3(0.35, 0.35, -0.87),
+              new Cesium.Cartesian3(),
+            ),
+            color: Cesium.Color.fromCssColorString("#FFE2B6"),
+            intensity: 2.0,
+          });
+        } catch {
+          // Older Cesium minor versions: fallthrough to default SunLight.
+        }
 
         // Per Google docs the root tileset URL has a ~3 hour session TTL.
         // We re-request root.json on every viewer mount, which is exactly what
@@ -212,13 +577,12 @@ export default function CesiumRoofViewInner({ coords, address }: Props) {
         // -----------------------------------------------------------------
         // Building isolation via ClippingPolygonCollection (CesiumJS ≥1.116).
         //
-        // We fetch the building's `boundingBox` from /api/roof-facts (which
-        // proxies Google Solar API `buildingInsights:findClosest`). The box
-        // gives us SW/NE lat/lng; we extrude it slightly (5m buffer) so eaves
-        // and immediate context survive, then build a single 4-vertex polygon
-        // in world ECEF via Cartesian3.fromDegreesArray. With `inverse: false`
-        // the collection clips OUTSIDE the polygon, leaving only the home
-        // visible against the dark scene background.
+        // We fetch the building footprint from OSM and expand it by a tight
+        // buffer so eaves and minor geocode error survive. With
+        // `inverse: true` the collection clips OUTSIDE the polygon, leaving
+        // only the home visible against the dark scene background. If OSM
+        // cannot identify a usable single building, Solar's bbox snaps the
+        // camera and clip to the nearest building before the circle fallback.
         //
         // Cesium API references:
         //   https://cesium.com/learn/cesiumjs/ref-doc/ClippingPolygonCollection.html
@@ -228,34 +592,78 @@ export default function CesiumRoofViewInner({ coords, address }: Props) {
         // ECEF directly, unlike the (broken) ClippingPlaneCollection ENU
         // approach we tried previously.
         // -----------------------------------------------------------------
-        await applyBuildingClip(Cesium, tileset, coords);
+        const dims = await applyBuildingClip(Cesium, tileset, coords);
+        if (!cancelled) setDimensions(dims);
 
 
-        // LOCK the camera to orbit around the address — pin stays centered.
+        // LOCK the camera to orbit around the selected target — pin stays
+        // centered. Usually this is the address; when OSM misses and Solar
+        // has a building bbox, it snaps to the bbox center instead.
         // `lookAtTransform(ENU(target), HPR)` pins the camera reference frame
         // at the building. User drag → orbit around target (NOT free pan).
         // Disable translation so user can never wander off the building.
-        const { lat, lng } = coords;
-        const target = Cesium.Cartesian3.fromDegrees(lng, lat, 0);
-        const enuTransform = Cesium.Transforms.eastNorthUpToFixedFrame(target);
-        viewer.scene.camera.lookAtTransform(
-          enuTransform,
-          new Cesium.HeadingPitchRange(
-            Cesium.Math.toRadians(0),
-            Cesium.Math.toRadians(-45),
-            220,
-          ),
-        );
-        viewer.scene.screenSpaceCameraController.enableTranslate = false;
+        const viewCoords = dims?.target ?? coords;
+        const { lat, lng } = viewCoords;
+        // Initial target uses the fallback height so the camera is at least
+        // above ground while we wait for the height sample.
+        let target = Cesium.Cartesian3.fromDegrees(lng, lat, DEFAULT_GROUND_HEIGHT_M);
+        targetRef.current = target;
+        const lockToTarget = (t: typeof target) => {
+          viewer.scene.camera.lookAtTransform(
+            Cesium.Transforms.eastNorthUpToFixedFrame(t),
+            new Cesium.HeadingPitchRange(
+              Cesium.Math.toRadians(DEFAULT_PRESET.heading),
+              Cesium.Math.toRadians(DEFAULT_PRESET.pitch),
+              DEFAULT_PRESET.range,
+            ),
+          );
+        };
+        lockToTarget(target);
+        const controller = viewer.scene.screenSpaceCameraController;
+        controller.enableTranslate = false;
+        controller.minimumZoomDistance = MINIMUM_ZOOM_DISTANCE_M;
 
-        // Bigger, more visible pin at the address — stays screen-centered.
+        // Tiles need to be near the camera before sampleHeightMostDetailed
+        // returns useful data. Pointing the camera at the location first —
+        // which we just did — kicks off that streaming. Sample after a beat
+        // and re-lock with the actual ground height. This jump is invisible
+        // because the tileset itself is still painting in the same window.
+        setTimeout(async () => {
+          if (cancelled || !viewerRef.current) return;
+          const groundHeight = await sampleGroundHeight(Cesium, viewer, lng, lat);
+          if (cancelled || !viewerRef.current) return;
+          target = Cesium.Cartesian3.fromDegrees(lng, lat, groundHeight);
+          targetRef.current = target;
+          lockToTarget(target);
+          // Re-pin at the corrected ground height so the dot doesn't sink
+          // into the mesh on the side / front views.
+          viewer.entities.removeAll();
+          viewer.entities.add({
+            position: target,
+            point: {
+              pixelSize: 28,
+              color: Cesium.Color.fromCssColorString("#3DAEFF"),
+              outlineColor: Cesium.Color.WHITE,
+              outlineWidth: 4,
+              heightReference: Cesium.HeightReference.NONE,
+              disableDepthTestDistance: Number.POSITIVE_INFINITY,
+            },
+          });
+        }, 1500);
+
+        // Pin the selected target — either the address or the snapped Solar
+        // bbox center — and keep it screen-centered.
         viewer.entities.add({
           position: target,
           point: {
-            pixelSize: 28,
-            color: Cesium.Color.fromCssColorString("#3DAEFF"),
-            outlineColor: Cesium.Color.WHITE,
-            outlineWidth: 4,
+            // Discreet white dot with a thin cyan ring. The big blue puck
+            // we shipped earlier dominated the frame and fought the GLB-
+            // extracted aesthetic — this version reads as a tasteful
+            // location marker without becoming the focal point.
+            pixelSize: 7,
+            color: Cesium.Color.WHITE,
+            outlineColor: Cesium.Color.fromCssColorString("#3DAEFF"),
+            outlineWidth: 1.5,
             heightReference: Cesium.HeightReference.NONE,
             disableDepthTestDistance: Number.POSITIVE_INFINITY,
           },
@@ -302,18 +710,34 @@ export default function CesiumRoofViewInner({ coords, address }: Props) {
       const Cesium: any = await import("cesium");
       if (cancelled || !viewerRef.current) return;
 
-      const target = Cesium.Cartesian3.fromDegrees(coords.lng, coords.lat, 0);
-
       // Rebuild the clipping polygon for the new building. Polygons live in
-      // world ECEF, so unlike planes we just regenerate the collection from
-      // the fresh boundingBox — no modelMatrix to update.
+      // world ECEF, so we just regenerate the collection from the fresh OSM
+      // footprint — no modelMatrix to update.
       const tileset = viewer.scene.primitives.get(0);
+      let dims: RoofDimensions | null = null;
       if (tileset) {
         // Drop the old collection first so a no-coverage address reverts to
         // the full neighbourhood mesh instead of inheriting the stale clip.
         tileset.clippingPolygons = undefined;
-        await applyBuildingClip(Cesium, tileset, coords);
+        dims = await applyBuildingClip(Cesium, tileset, coords);
+        if (!cancelled) setDimensions(dims);
       }
+      const viewCoords = dims?.target ?? coords;
+
+      // First-paint target uses the selected target; sample the real ground
+      // height once the tileset has painted nearby and reset the target then.
+      const groundHeight = await sampleGroundHeight(
+        Cesium,
+        viewer,
+        viewCoords.lng,
+        viewCoords.lat,
+      );
+      const target = Cesium.Cartesian3.fromDegrees(
+        viewCoords.lng,
+        viewCoords.lat,
+        groundHeight,
+      );
+      targetRef.current = target;
 
       // Move pin to new location (same big visible style as initial mount)
       viewer.entities.removeAll();
@@ -334,24 +758,25 @@ export default function CesiumRoofViewInner({ coords, address }: Props) {
       // immediately re-lock at the new target after the flight completes.
       viewer.scene.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
       viewer.scene.camera.flyToBoundingSphere(
-        new Cesium.BoundingSphere(target, 100),
+        new Cesium.BoundingSphere(target, 60),
         {
           duration: 1.2,
           offset: new Cesium.HeadingPitchRange(
-            Cesium.Math.toRadians(0),
-            Cesium.Math.toRadians(-45),
-            220,
+            Cesium.Math.toRadians(DEFAULT_PRESET.heading),
+            Cesium.Math.toRadians(DEFAULT_PRESET.pitch),
+            DEFAULT_PRESET.range,
           ),
           complete: () => {
             const enu = Cesium.Transforms.eastNorthUpToFixedFrame(target);
             viewer.scene.camera.lookAtTransform(
               enu,
               new Cesium.HeadingPitchRange(
-                Cesium.Math.toRadians(0),
-                Cesium.Math.toRadians(-45),
-                220,
+                Cesium.Math.toRadians(DEFAULT_PRESET.heading),
+                Cesium.Math.toRadians(DEFAULT_PRESET.pitch),
+                DEFAULT_PRESET.range,
               ),
             );
+            if (!cancelled) setActivePreset(DEFAULT_PRESET.id);
           },
         },
       );
@@ -368,6 +793,31 @@ export default function CesiumRoofViewInner({ coords, address }: Props) {
   // Auto-orbit removed per UX brainstorm — homeowners want a stable view
   // to confirm "that's my roof", not a cinematic spin. User can drag to
   // rotate manually whenever they want.
+
+  // -------------------------------------------------------------------------
+  // Preset camera framings.
+  //
+  // Re-lock onto the building's local ENU frame at the chosen heading / pitch
+  // / range. We snap rather than fly so successive clicks feel responsive —
+  // a 1.2 s flyTo per button mash makes the UI feel laggy. `lookAtTransform`
+  // with a fresh HeadingPitchRange is effectively instant.
+  // -------------------------------------------------------------------------
+  const setView = useCallback((preset: CameraPreset) => {
+    const Cesium = cesiumRef.current;
+    const viewer = viewerRef.current;
+    const target = targetRef.current;
+    if (!Cesium || !viewer || !target) return;
+    const enu = Cesium.Transforms.eastNorthUpToFixedFrame(target);
+    viewer.scene.camera.lookAtTransform(
+      enu,
+      new Cesium.HeadingPitchRange(
+        Cesium.Math.toRadians(preset.heading),
+        Cesium.Math.toRadians(preset.pitch),
+        preset.range,
+      ),
+    );
+    setActivePreset(preset.id);
+  }, []);
 
   // -------------------------------------------------------------------------
   // Render
@@ -404,6 +854,130 @@ export default function CesiumRoofViewInner({ coords, address }: Props) {
             <span className="relative inline-flex h-2 w-2 rounded-md bg-[#62E6A7]" />
           </span>
           Live photoreal · drag to rotate
+        </div>
+      )}
+
+      {/* Camera preset row — top-right of the left pane. Snaps the lookAt
+          transform to a fixed framing so the user can compare e.g. roof
+          pitch (-60°) vs front elevation (-15°) vs top-down (-90°). */}
+      {status === "ready" && (
+        <div
+          role="toolbar"
+          aria-label="Camera presets"
+          className="absolute top-4 right-4 z-10 flex flex-wrap justify-end gap-1 rounded-md border border-[#2A3038] bg-[#0A0E1A]/80 backdrop-blur p-1"
+        >
+          {CAMERA_PRESETS.map((preset) => {
+            const active = preset.id === activePreset;
+            return (
+              <button
+                key={preset.id}
+                type="button"
+                onClick={() => setView(preset)}
+                aria-pressed={active}
+                className={`px-2.5 py-1 rounded text-[11px] tracking-tight transition-colors ${
+                  active
+                    ? "bg-[#3DAEFF] text-[#0A0E1A] font-medium"
+                    : "text-[#9BA3AF] hover:text-[#F7F8FA] hover:bg-[#12161C]"
+                }`}
+              >
+                {preset.label}
+              </button>
+            );
+          })}
+          <button
+            type="button"
+            onClick={() => setView(DEFAULT_PRESET)}
+            aria-label="Recenter"
+            title="Recenter"
+            className="px-2 py-1 rounded text-[11px] text-[#9BA3AF] hover:text-[#F7F8FA] hover:bg-[#12161C] transition-colors"
+          >
+            🎯
+          </button>
+        </div>
+      )}
+
+      {/* Dimensions disclosure — sits below the preset row. Header is always
+          visible and clickable; the body (length × width × area × pitch)
+          collapses to keep the 3D mesh unobstructed when the user wants it. */}
+      {status === "ready" && dimensions && (
+        <div className="absolute top-16 right-4 z-10 rounded-md border border-[#2A3038] bg-[#0A0E1A]/80 backdrop-blur text-[11px] text-[#9BA3AF] overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setDimsOpen((v) => !v)}
+            aria-expanded={dimsOpen}
+            aria-controls="cesium-dimensions-body"
+            className="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-[10px] uppercase tracking-wider text-[#5B6470] hover:text-[#9BA3AF] transition-colors"
+          >
+            <span>
+              Dimensions
+              <span className="ml-1.5 normal-case tracking-normal text-[9px] text-[#5B6470]">
+                ({dimensions.source === "osm"
+                  ? "OSM"
+                  : dimensions.source === "solar-bbox"
+                    ? "Solar bbox · snapped"
+                  : dimensions.source === "circle"
+                    ? "Circle"
+                    : "Solar"})
+              </span>
+            </span>
+            <svg
+              width="10"
+              height="10"
+              viewBox="0 0 10 10"
+              fill="none"
+              aria-hidden="true"
+              className={`transition-transform ${dimsOpen ? "rotate-180" : ""}`}
+            >
+              <path
+                d="M2 4l3 3 3-3"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+          {dimsOpen && (
+            <div
+              id="cesium-dimensions-body"
+              className="grid grid-cols-[auto_auto] gap-x-3 gap-y-0.5 tabular-nums px-3 pb-2 pt-0.5 border-t border-[#2A3038]"
+            >
+              <span>Length</span>
+              <span className="text-right text-[#F7F8FA]">
+                {dimensions.lengthM.toFixed(1)} m
+              </span>
+              <span>Width</span>
+              <span className="text-right text-[#F7F8FA]">
+                {dimensions.widthM.toFixed(1)} m
+              </span>
+              <span>Footprint</span>
+              <span className="text-right text-[#F7F8FA]">
+                {Math.round(dimensions.footprintAreaM2)} m²
+              </span>
+              {dimensions.source === "circle" && (
+                <span className="col-span-2 max-w-[180px] pt-1 text-[#F2B84B]">
+                  ⚠ Building not detected — approximate
+                </span>
+              )}
+              {dimensions.totalRoofAreaM2 != null &&
+                dimensions.totalRoofAreaM2 > 0 && (
+                  <>
+                    <span>Roof area</span>
+                    <span className="text-right text-[#F7F8FA]">
+                      {Math.round(dimensions.totalRoofAreaM2)} m²
+                    </span>
+                  </>
+                )}
+              {dimensions.roofPitchDeg != null && (
+                <>
+                  <span>Pitch</span>
+                  <span className="text-right text-[#F7F8FA]">
+                    {Math.round(dimensions.roofPitchDeg)}°
+                  </span>
+                </>
+              )}
+            </div>
+          )}
         </div>
       )}
 

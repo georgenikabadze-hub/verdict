@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createLead, listLeads, type LeadRecord } from "@/lib/leads/store";
+import { createLead, listLeads, type CreateLeadInput } from "@/lib/leads/store";
 
 export const dynamic = "force-dynamic";
 
@@ -8,19 +8,40 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const body = (await req.json()) as Partial<LeadRecord>;
-  if (!body.id || !body.customerName) {
-    return NextResponse.json({ error: "id and customerName required" }, { status: 400 });
+  const body = (await req.json()) as Partial<CreateLeadInput>;
+  if (
+    !body.id ||
+    !body.address ||
+    typeof body.lat !== "number" ||
+    typeof body.lng !== "number" ||
+    typeof body.monthlyBillEur !== "number"
+  ) {
+    return NextResponse.json(
+      { error: "id, address, lat, lng, and monthlyBillEur required" },
+      { status: 400 },
+    );
   }
-  const lead: LeadRecord = {
-    id: body.id,
-    createdAt: new Date().toISOString(),
-    status: "new",
-    customerName: body.customerName,
-    city: body.city ?? "—",
-    totalEur: body.totalEur ?? 0,
-    monthlySavingsEur: body.monthlySavingsEur ?? 0,
-    paybackYears: body.paybackYears ?? 0,
-  };
-  return NextResponse.json({ lead: createLead(lead) }, { status: 201 });
+
+  return NextResponse.json(
+    {
+      lead: createLead({
+        id: body.id,
+        createdAt: body.createdAt,
+        status: body.status,
+        address: body.address,
+        lat: body.lat,
+        lng: body.lng,
+        district: body.district,
+        customerName: body.customerName,
+        email: body.email,
+        phone: body.phone,
+        monthlyBillEur: body.monthlyBillEur,
+        ev: body.ev ?? false,
+        heating: body.heating ?? "gas",
+        goal: body.goal ?? "lower_bill",
+        roofSegments: body.roofSegments,
+      }),
+    },
+    { status: 201 },
+  );
 }

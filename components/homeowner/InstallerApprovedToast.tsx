@@ -5,7 +5,7 @@ import { Bell, X } from "lucide-react";
 
 interface LeadShape {
   id: string;
-  status: "new" | "approved";
+  status: "new" | "accepted" | "offer_sent" | "closed" | "approved";
   installerName?: string;
   installerLogoEmoji?: string;
   totalEur: number;
@@ -16,7 +16,7 @@ interface LeadShape {
 }
 
 const POLL_INTERVAL_MS = 2_000;
-const DEMO_LEAD_ID = "demo-conrad";
+const FALLBACK_LEAD_ID = "demo-conrad";
 
 export function InstallerApprovedToast() {
   const [lead, setLead] = useState<LeadShape | null>(null);
@@ -24,13 +24,15 @@ export function InstallerApprovedToast() {
 
   useEffect(() => {
     let cancelled = false;
+    const leadId = window.localStorage.getItem("verdict.lastLeadId") ?? FALLBACK_LEAD_ID;
+
     const tick = async () => {
       if (cancelled) return;
       try {
-        const res = await fetch(`/api/leads/${DEMO_LEAD_ID}`, { cache: "no-store" });
+        const res = await fetch(`/api/leads/${leadId}`, { cache: "no-store" });
         if (!res.ok) return;
         const data = await res.json();
-        if (!cancelled && data.lead?.status === "approved") {
+        if (!cancelled && (data.lead?.status === "approved" || data.lead?.status === "offer_sent")) {
           setLead(data.lead);
         }
       } catch {

@@ -2,19 +2,59 @@
 
 import { useState } from "react";
 import { Send, Check } from "lucide-react";
+import type { Goal, Heating, RoofSegment } from "@/lib/contracts";
 
 interface Props {
-  leadId: string;
+  address: string;
+  coords: { lat: number; lng: number };
+  intake: {
+    monthlyBillEur: number;
+    ev: boolean;
+    heating: Heating;
+    goal: Goal;
+  };
+  roofSegments: RoofSegment[];
 }
 
-export function SendToInstaller({ leadId }: Props) {
+export function SendToInstaller({ address, coords, intake, roofSegments }: Props) {
   const [state, setState] = useState<"idle" | "sending" | "sent">("idle");
+  const [leadId, setLeadId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const send = async () => {
     setState("sending");
-    // Simulate the lead-packet POST. Real handoff arrives in Sprint 4 (Vercel KV).
-    await new Promise((r) => setTimeout(r, 900));
-    setState("sent");
+    setError(null);
+    const nextLeadId = `q-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+
+    try {
+      const res = await fetch("/api/leads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: nextLeadId,
+          address,
+          lat: coords.lat,
+          lng: coords.lng,
+          monthlyBillEur: intake.monthlyBillEur,
+          ev: intake.ev,
+          heating: intake.heating,
+          goal: intake.goal,
+          roofSegments,
+        }),
+      });
+
+      if (res.status !== 201) {
+        throw new Error(`Lead POST failed with status ${res.status}`);
+      }
+
+      window.localStorage.setItem("verdict.lastLeadId", nextLeadId);
+      setLeadId(nextLeadId);
+      setState("sent");
+    } catch (err) {
+      console.error(err);
+      setError("Couldn't reach our installers. Try again.");
+      setState("idle");
+    }
   };
 
   if (state === "sent") {
@@ -56,6 +96,9 @@ export function SendToInstaller({ leadId }: Props) {
       <p className="text-[11px] text-[#5B6470] text-center">
         non-binding · no phone call · the installer receives roof measurement, demand profile, and recommended system
       </p>
+      {error ? (
+        <p className="text-xs text-[#F2B84B] text-center">{error}</p>
+      ) : null}
     </div>
   );
 }

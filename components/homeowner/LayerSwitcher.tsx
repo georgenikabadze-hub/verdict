@@ -24,7 +24,7 @@ export function LayerSwitcher({ value, onChange }: Props) {
           aria-pressed={value === opt.value}
           className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
             value === opt.value
-              ? "bg-[#3DAEFF] text-[#0A0E1A]"
+              ? "border border-white/20 bg-white/10 text-[#F7F8FA] backdrop-blur"
               : "text-[#9BA3AF] hover:text-[#F7F8FA]"
           }`}
         >
