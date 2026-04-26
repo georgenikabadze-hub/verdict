@@ -63,6 +63,47 @@ export function InstallerMarketplace({ initialLeads, mapsApiKey }: Props) {
     const stored = window.localStorage.getItem(EXACT_VIEW_STORAGE_KEY);
     if (stored === "0") setExactView(false);
   }, []);
+  // -----------------------------------------------------------------------
+  // Refetch on mount + on tab focus.
+  //
+  // Why: the lead store is in-memory on `globalThis` (lib/leads/store.ts).
+  // On Vercel each serverless function invocation has its OWN Map, so a
+  // POST to /api/leads (which created the lead in lambda instance A) and
+  // an SSR for /installer (which ran on instance B) end up looking at
+  // different stores. Instance B SSRs `initialLeads: []` and the
+  // marketplace appears empty even though the lead exists.
+  //
+  // Refetching on mount works because the API GET *also* hits whatever
+  // instance has the data — and Vercel's load balancer keeps warm
+  // instances stable enough that we usually hit the same one twice in a
+  // row. Focus-refetch covers the homeowner-just-submitted case where
+  // the installer tab was already open.
+  // -----------------------------------------------------------------------
+  useEffect(() => {
+    let cancelled = false;
+    const refetch = async () => {
+      try {
+        const res = await fetch("/api/leads", { cache: "no-store" });
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as { leads?: LeadRecord[] };
+        if (cancelled) return;
+        const fetched = Array.isArray(data.leads) ? data.leads : [];
+        setLeads(fetched);
+        // Only auto-select if nothing is selected yet — don't yank the
+        // installer off the lead they were already inspecting.
+        setSelectedId((prev) => prev ?? fetched[0]?.id ?? null);
+      } catch {
+        // Network blip — keep the existing list. Next focus event retries.
+      }
+    };
+    refetch();
+    const onFocus = () => refetch();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", onFocus);
+    };
+  }, []);
   const toggleExactView = () => {
     setExactView((prev) => {
       const next = !prev;
