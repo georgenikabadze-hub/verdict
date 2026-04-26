@@ -245,14 +245,14 @@ export function IntakePanel({ onLocate }: Props = {}) {
               type="number"
               inputMode="numeric"
               min={0}
-              step={5}
+              step={50}
               value={annualBill}
               onChange={(e) => setMonthlyBill(e.target.value)}
-              placeholder="120"
+              placeholder="1500"
               className="w-full rounded-lg border border-[#2A3038] bg-[#12161C] pl-7 pr-16 py-2.5 text-sm text-[#F7F8FA] placeholder:text-[#5B6470] focus:outline-none focus:border-[#3DAEFF] focus:ring-2 focus:ring-[#3DAEFF]/30 transition-all"
             />
             <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-[#5B6470]">
-              / month
+              / year
             </span>
           </div>
         ) : (

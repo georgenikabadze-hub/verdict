@@ -16,11 +16,17 @@ const BUILDING_INSIGHTS_ENDPOINT =
 const DATA_LAYERS_ENDPOINT = "https://solar.googleapis.com/v1/dataLayers:get";
 
 const DEFAULT_DATA_LAYERS_RADIUS_METERS = 50;
+const DATA_LAYERS_CACHE_TTL_MS = 1000 * 60 * 60;
 
 export interface SolarApiResult<T = unknown> {
   data: T;
   apiStatus: ApiStatus;
 }
+
+const dataLayersCache = new Map<
+  string,
+  { expiresAt: number; result: Promise<SolarApiResult> | SolarApiResult }
+>();
 
 function getKey(): string {
   const key = process.env.GOOGLE_MAPS_API_KEY;
@@ -138,6 +144,36 @@ export async function getDataLayers(
   lat: number,
   lng: number,
   radiusMeters: number = DEFAULT_DATA_LAYERS_RADIUS_METERS,
+): Promise<SolarApiResult> {
+  const cacheKey = `${latLngKey(lat, lng)}_${radiusMeters}`;
+  const cached = dataLayersCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.result;
+  }
+
+  const resultPromise = fetchDataLayers(lat, lng, radiusMeters);
+  dataLayersCache.set(cacheKey, {
+    expiresAt: Date.now() + DATA_LAYERS_CACHE_TTL_MS,
+    result: resultPromise,
+  });
+
+  try {
+    const result = await resultPromise;
+    dataLayersCache.set(cacheKey, {
+      expiresAt: Date.now() + DATA_LAYERS_CACHE_TTL_MS,
+      result,
+    });
+    return result;
+  } catch (err) {
+    dataLayersCache.delete(cacheKey);
+    throw err;
+  }
+}
+
+async function fetchDataLayers(
+  lat: number,
+  lng: number,
+  radiusMeters: number,
 ): Promise<SolarApiResult> {
   const url =
     `${DATA_LAYERS_ENDPOINT}?location.latitude=${lat}` +

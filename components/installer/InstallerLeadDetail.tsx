@@ -14,6 +14,7 @@ import {
   RotateCcw,
   Send,
   Sparkles,
+  Sun,
 } from "lucide-react";
 import type { BoM, Intake, RoofSegment, Strategy, Variant } from "@/lib/contracts";
 import type { LeadRecord } from "@/lib/leads/store";
@@ -32,6 +33,10 @@ import {
   panelKey,
   type SolarPanelEntry,
 } from "@/components/installer/PanelOverlayCesium";
+import {
+  SunHeatmapCesium,
+  type SunHeatmapMeta,
+} from "@/components/installer/SunHeatmapCesium";
 
 interface Props {
   lead: LeadRecord;
@@ -62,6 +67,19 @@ interface RoofFactsResponse {
 
 /** Watt-peak per panel — matches lib/sizing/calculate.ts (440W modules). */
 const PANEL_KWP = 0.44;
+const PANEL_AREA_M2 = 1.72 * 1.13;
+const PANEL_MODULE_EFFICIENCY = 0.226;
+
+interface DataLayersMeta extends SunHeatmapMeta {
+  width?: number;
+  height?: number;
+}
+
+interface HeatmapSampler {
+  meta: DataLayersMeta;
+  canvas: HTMLCanvasElement;
+  ctx: CanvasRenderingContext2D;
+}
 
 function formatTime(iso?: string): string {
   if (!iso) return "just now";
@@ -177,6 +195,51 @@ function median(nums: number[]): number {
   return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
 }
 
+function heatPixelToT(r: number, g: number): number {
+  // Inverse of lib/heatmaps/generate.ts red->yellow->green ramp.
+  if (g < 250) return Math.max(0, Math.min(0.5, g / 510));
+  return Math.max(0.5, Math.min(1, 1 - r / 510));
+}
+
+function sampleAnnualFluxKwhM2(
+  sampler: HeatmapSampler | null,
+  lat: number,
+  lng: number,
+): number | null {
+  if (!sampler?.meta.fluxRange) return null;
+  const { bounds, fluxRange } = sampler.meta;
+  if (
+    lat < bounds.south ||
+    lat > bounds.north ||
+    lng < bounds.west ||
+    lng > bounds.east ||
+    bounds.north <= bounds.south ||
+    bounds.east <= bounds.west
+  ) {
+    return null;
+  }
+  const x = Math.round(
+    ((lng - bounds.west) / (bounds.east - bounds.west)) *
+      (sampler.canvas.width - 1),
+  );
+  const y = Math.round(
+    ((bounds.north - lat) / (bounds.north - bounds.south)) *
+      (sampler.canvas.height - 1),
+  );
+  try {
+    const [r, g, , a] = sampler.ctx.getImageData(x, y, 1, 1).data;
+    if (a < 10) return null;
+    const t = heatPixelToT(r, g);
+    return fluxRange.min + t * (fluxRange.max - fluxRange.min);
+  } catch {
+    return null;
+  }
+}
+
+function fluxToPanelYieldKwh(annualFluxKwhM2: number): number {
+  return annualFluxKwhM2 * PANEL_AREA_M2 * PANEL_MODULE_EFFICIENCY;
+}
+
 function intakeFromLead(lead: LeadRecord): Intake {
   const prefs = lead.publicPreview.preferences;
   const goal: Intake["goal"] = prefs.goal === "independent" ? "independence" : "lower_bill";
@@ -223,27 +286,39 @@ export function InstallerLeadDetail({ lead, onLeadChange }: Props) {
   );
   const [showPanels, setShowPanels] = useState(true);
   const [editMode, setEditMode] = useState(false);
+  const [sunLayerVisible, setSunLayerVisible] = useState(true);
+  const [heatmapMeta, setHeatmapMeta] = useState<DataLayersMeta | null>(null);
+  const [heatmapSampler, setHeatmapSampler] = useState<HeatmapSampler | null>(null);
+  const [heatmapStatus, setHeatmapStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
 
   // Installer review is anchored to the lead the homeowner actually sent.
   // Live roof facts may recompute a larger demand-cap system after creation
   // (notably HP+EV), but the visible overlay and BoM must agree with the
   // stored customer preview count.
   const leadPanelCount = lead.publicPreview.sizing.panelCount;
+  // Always use publicPreview.bomVariants for the BoM display. liveSizing
+  // can recompute a different panel count (e.g. when HP+EV preferences
+  // inflate futureDemand and the demand-cap pushes the optimizer higher).
+  // If we showed liveSizing's BoM total but pinned the count to the lead
+  // preview's count, totalEur would reflect a different system size than
+  // the displayed panel count — and the per-panel cost would be obviously
+  // wrong (e.g. €3,800/panel for a household-scale install). The
+  // publicPreview's BoM was composed at lead creation time with exactly
+  // panelCount panels, so its totalEur and count are by construction
+  // consistent.
   const baseVariants: Variant[] = useMemo(
     () =>
-      (liveSizing?.variants ? [...liveSizing.variants] : lead.publicPreview.bomVariants).map(
-        (variant) => ({
-          ...variant,
-          bom: {
-            ...variant.bom,
-            panels: {
-              ...variant.bom.panels,
-              count: leadPanelCount,
-            },
+      lead.publicPreview.bomVariants.map((variant) => ({
+        ...variant,
+        bom: {
+          ...variant.bom,
+          panels: {
+            ...variant.bom.panels,
+            count: leadPanelCount,
           },
-        }),
-      ),
-    [liveSizing?.variants, lead.publicPreview.bomVariants, leadPanelCount],
+        },
+      })),
+    [lead.publicPreview.bomVariants, leadPanelCount],
   );
 
   const [selectedVariantId, setSelectedVariantId] = useState(lead.publicPreview.bomVariants[1]?.id);
@@ -262,6 +337,10 @@ export function InstallerLeadDetail({ lead, onLeadChange }: Props) {
     setRemovedPanelKeys(new Set());
     setDisabledSegmentIndexes(new Set());
     setEditMode(false);
+    setHeatmapMeta(null);
+    setHeatmapSampler(null);
+    setHeatmapStatus("loading");
+    setSunLayerVisible(true);
 
     const { lat, lng } = lead.privateDetails;
     fetch(`/api/roof-facts?lat=${lat}&lng=${lng}`, { cache: "no-store" })
@@ -349,6 +428,53 @@ export function InstallerLeadDetail({ lead, onLeadChange }: Props) {
     };
   }, [lead]);
 
+  useEffect(() => {
+    let cancelled = false;
+    const { lat, lng } = lead.privateDetails;
+
+    setHeatmapStatus("loading");
+    fetch(`/api/data-layers?lat=${lat}&lng=${lng}`, { cache: "no-store" })
+      .then((res) => {
+        if (!res.ok) throw new Error("data-layers failed");
+        return res.json() as Promise<DataLayersMeta>;
+      })
+      .then((meta) => {
+        if (cancelled || !meta?.imageUrl || !meta.bounds) return;
+        setHeatmapMeta(meta);
+
+        const image = new Image();
+        image.decoding = "async";
+        image.onload = () => {
+          if (cancelled) return;
+          const canvas = document.createElement("canvas");
+          canvas.width = image.naturalWidth || meta.width || 1;
+          canvas.height = image.naturalHeight || meta.height || 1;
+          const ctx = canvas.getContext("2d", { willReadFrequently: true });
+          if (!ctx) {
+            setHeatmapStatus("error");
+            return;
+          }
+          ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+          setHeatmapSampler({ meta, canvas, ctx });
+          setHeatmapStatus("ready");
+        };
+        image.onerror = () => {
+          if (!cancelled) setHeatmapStatus("error");
+        };
+        image.src = meta.imageUrl;
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setHeatmapMeta(null);
+        setHeatmapSampler(null);
+        setHeatmapStatus("error");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [lead.privateDetails.lat, lead.privateDetails.lng]);
+
   // Toggle a single panel's removed state. Called by PanelOverlayCesium when
   // the installer clicks a polygon. Stable identity so the overlay's
   // ScreenSpaceEventHandler doesn't churn on every render.
@@ -393,12 +519,25 @@ export function InstallerLeadDetail({ lead, onLeadChange }: Props) {
   // homeowner quote into a 30-panel installer overlay.
   const sizerPanelCount = leadPanelCount;
 
+  const panelYieldKwh = useCallback(
+    (panel: SolarPanelEntry): number => {
+      const sampledFlux = sampleAnnualFluxKwhM2(
+        heatmapSampler,
+        panel.center.latitude,
+        panel.center.longitude,
+      );
+      if (sampledFlux !== null) return fluxToPanelYieldKwh(sampledFlux);
+      return Math.max(0, panel.yearlyEnergyDcKwh ?? 0);
+    },
+    [heatmapSampler],
+  );
+
   const highestYieldSegmentIndex = useMemo<number | null>(() => {
     const totals = new Map<number, { total: number; count: number }>();
     for (const p of solarPanels) {
       if (p.segmentIndex < 0) continue;
       const entry = totals.get(p.segmentIndex) ?? { total: 0, count: 0 };
-      entry.total += p.yearlyEnergyDcKwh ?? 0;
+      entry.total += panelYieldKwh(p);
       entry.count += 1;
       totals.set(p.segmentIndex, entry);
     }
@@ -418,7 +557,7 @@ export function InstallerLeadDetail({ lead, onLeadChange }: Props) {
       }
     }
     return bestIndex;
-  }, [solarPanels]);
+  }, [solarPanels, panelYieldKwh]);
 
   // Top-N AI panels by yield on one roof face. This trades a few theoretical
   // kWh for a clean rectangular demo layout and avoids mixing azimuths.
@@ -428,10 +567,10 @@ export function InstallerLeadDetail({ lead, onLeadChange }: Props) {
         ? solarPanels
         : solarPanels.filter((p) => p.segmentIndex === highestYieldSegmentIndex);
     const sortedAi = [...eligible].sort(
-      (a, b) => (b.yearlyEnergyDcKwh ?? 0) - (a.yearlyEnergyDcKwh ?? 0),
+      (a, b) => panelYieldKwh(b) - panelYieldKwh(a),
     );
     return sortedAi.slice(0, sizerPanelCount);
-  }, [solarPanels, highestYieldSegmentIndex, sizerPanelCount]);
+  }, [solarPanels, highestYieldSegmentIndex, sizerPanelCount, panelYieldKwh]);
   const aiDisabledBySegmentCount = useMemo(
     () =>
       aiTopSlice.filter((p) => disabledSegmentIndexes.has(p.segmentIndex)).length,
@@ -453,8 +592,8 @@ export function InstallerLeadDetail({ lead, onLeadChange }: Props) {
   const activePanelCount =
     solarPanels.length === 0 ? sizerPanelCount + manualActiveCount : aiActiveCount + manualActiveCount;
   const totalSlicedYieldKwh = useMemo(
-    () => aiTopSlice.reduce((sum, p) => sum + Math.max(0, p.yearlyEnergyDcKwh ?? 0), 0),
-    [aiTopSlice],
+    () => aiTopSlice.reduce((sum, p) => sum + panelYieldKwh(p), 0),
+    [aiTopSlice, panelYieldKwh],
   );
   const activeYieldKwh = useMemo(
     () =>
@@ -462,9 +601,12 @@ export function InstallerLeadDetail({ lead, onLeadChange }: Props) {
         if (disabledSegmentIndexes.has(p.segmentIndex)) return sum;
         const key = panelKey(idx, p.center.latitude, p.center.longitude);
         if (removedPanelKeys.has(key)) return sum;
-        return sum + Math.max(0, p.yearlyEnergyDcKwh ?? 0);
-      }, 0),
-    [aiTopSlice, disabledSegmentIndexes, removedPanelKeys],
+        return sum + panelYieldKwh(p);
+      }, manuallyAddedPanels.reduce((sum, p, idx) => {
+        if (removedPanelKeys.has(`manual-${idx}`)) return sum;
+        return sum + panelYieldKwh(p);
+      }, 0)),
+    [aiTopSlice, disabledSegmentIndexes, manuallyAddedPanels, panelYieldKwh, removedPanelKeys],
   );
   const yieldScale = totalSlicedYieldKwh > 0 ? activeYieldKwh / totalSlicedYieldKwh : 1;
   const variants: Variant[] = useMemo(() => {
@@ -639,6 +781,11 @@ export function InstallerLeadDetail({ lead, onLeadChange }: Props) {
           defaultAzimuthDegrees={dominantAzimuthDegrees}
           defaultPitchDegrees={dominantPitchDegrees}
         />
+        <SunHeatmapCesium
+          viewer={cesiumViewer}
+          heatmap={heatmapMeta}
+          visible={sunLayerVisible && heatmapStatus === "ready"}
+        />
         <div className="pointer-events-none absolute left-4 top-4 rounded-md border border-[#2A3038] bg-[#0A0E1A]/80 px-3 py-2 text-xs backdrop-blur">
           <div className="font-semibold text-[#F7F8FA]">{lead.publicPreview.district}</div>
           <div className="mt-0.5 text-[#9BA3AF]">Exact rooftop model · customer details gated</div>
@@ -647,6 +794,24 @@ export function InstallerLeadDetail({ lead, onLeadChange }: Props) {
             dimensions disclosure/camera controls in the top-right corner. */}
         {(solarPanels.length > 0 || manuallyAddedPanels.length > 0) ? (
           <div className="absolute bottom-4 right-4 z-10 flex flex-col items-end gap-2">
+            <button
+              type="button"
+              onClick={() => setSunLayerVisible((v) => !v)}
+              disabled={heatmapStatus !== "ready"}
+              className={`flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[11px] font-medium backdrop-blur transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${
+                sunLayerVisible && heatmapStatus === "ready"
+                  ? "border-[#62E6A7] bg-[#62E6A7]/15 text-[#62E6A7] hover:bg-[#62E6A7]/25"
+                  : "border-[#F2B84B]/40 bg-[#0A0E1A]/85 text-[#F7F8FA] hover:border-[#F2B84B]"
+              }`}
+              aria-pressed={sunLayerVisible && heatmapStatus === "ready"}
+            >
+              <Sun size={12} />
+              {heatmapStatus === "loading"
+                ? "Loading sun"
+                : sunLayerVisible && heatmapStatus === "ready"
+                  ? "Hide sun layer"
+                  : "Sun layer"}
+            </button>
             <button
               type="button"
               onClick={() => setShowPanels((v) => !v)}

@@ -34,6 +34,12 @@ export async function GET(req: NextRequest) {
           "X-Flux-Min": String(Math.round(result.fluxRange.min)),
           "X-Flux-Max": String(Math.round(result.fluxRange.max)),
         }),
+        ...(result.bounds && {
+          "X-Bounds-South": String(result.bounds.south),
+          "X-Bounds-West": String(result.bounds.west),
+          "X-Bounds-North": String(result.bounds.north),
+          "X-Bounds-East": String(result.bounds.east),
+        }),
       },
     });
   } catch (e) {

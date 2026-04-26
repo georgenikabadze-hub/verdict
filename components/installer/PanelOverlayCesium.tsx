@@ -80,6 +80,7 @@ const PANEL_DIMS = {
 
 const PANEL_HEIGHT_OFFSET_M = 0.15; // hover ~15 cm above the roof plane
 const PANEL_THICKNESS_M = 0.05;
+const FLAT_SEGMENT_PITCH_DEGREES = 5;
 const ENTITY_NAME_PREFIX = "panel-";
 
 const ACTIVE_COLOR = "#3DAEFF";       // AI-placed, active
@@ -182,10 +183,9 @@ function panelCorners(
 
 /**
  * Snap AI panels onto clean horizontal rows aligned with each roof segment's
- * ridge, preserving Google's along-row spacing so chimneys, dormers,
- * skylights, and other obstructions Google already routed around stay
- * routed-around. Conservative by design: we only snap V (down-slope index)
- * — U (along-ridge position) is left exactly where Google placed it.
+ * ridge. We snap V globally into rows, then snap U only inside tight clusters
+ * within a row so small Solar API center jitter disappears while wider gaps
+ * around chimneys, dormers, skylights, and other obstructions are preserved.
  *
  * Visual effect: rows line up across the roof; gaps within a row stay where
  * Google left them. Manual panels (segmentIndex = -1) are skipped entirely
@@ -234,10 +234,16 @@ function snapPanelsToGrid(panels: SolarPanelEntry[]): SolarPanelEntry[] {
     const cosLat = Math.cos((segLat * Math.PI) / 180);
     const safeCosLat = Math.abs(cosLat) < 1e-6 ? 1e-6 : cosLat;
 
+    interface GridPanel {
+      panel: SolarPanelEntry;
+      dims: (typeof PANEL_DIMS)[keyof typeof PANEL_DIMS];
+      u: number;
+      vIdx: number;
+    }
+
+    const rows = new Map<number, GridPanel[]>();
     for (const p of segPanels) {
       const dims = PANEL_DIMS[p.orientation] ?? PANEL_DIMS.LANDSCAPE;
-      // Row pitch (down-slope) is one panel-height + 5 cm visual gap. We do
-      // NOT step U because that's where Google's obstruction avoidance lives.
       const cellV = dims.hM + 0.05;
 
       const dE = (p.center.longitude - segLng) * 111_320 * safeCosLat;
@@ -246,18 +252,55 @@ function snapPanelsToGrid(panels: SolarPanelEntry[]): SolarPanelEntry[] {
       const v = dE * downE + dN * downN;
 
       const vIdx = Math.round(v / cellV);
-      const vS = vIdx * cellV;
-      // U stays exactly where Google placed it — preserves panel-sized gaps
-      // around chimneys/skylights along the row.
-      const dE_s = u * ridgeE + vS * downE;
-      const dN_s = u * ridgeN + vS * downN;
-      const newLat = segLat + dN_s / 111_320;
-      const newLng = segLng + dE_s / (111_320 * safeCosLat);
+      const row = rows.get(vIdx) ?? [];
+      row.push({ panel: p, dims, u, vIdx });
+      rows.set(vIdx, row);
+    }
 
-      out.set(p, {
-        ...p,
-        center: { latitude: newLat, longitude: newLng },
-      });
+    for (const row of rows.values()) {
+      row.sort((a, b) => a.u - b.u);
+
+      const runs: GridPanel[][] = [];
+      let currentRun: GridPanel[] = [];
+      for (const item of row) {
+        const prev = currentRun[currentRun.length - 1];
+        if (!prev) {
+          currentRun.push(item);
+          continue;
+        }
+
+        const gap = item.u - prev.u;
+        const clusterThreshold = 1.3 * Math.max(prev.dims.wM, item.dims.wM);
+        if (gap <= clusterThreshold) {
+          currentRun.push(item);
+        } else {
+          runs.push(currentRun);
+          currentRun = [item];
+        }
+      }
+      if (currentRun.length > 0) runs.push(currentRun);
+
+      for (const run of runs) {
+        const avgPanelWidth =
+          run.reduce((sum, item) => sum + item.dims.wM, 0) / run.length;
+        const runCenterU =
+          run.reduce((sum, item) => sum + item.u, 0) / run.length;
+        const startU = runCenterU - ((run.length - 1) * avgPanelWidth) / 2;
+
+        run.forEach((item, runIdx) => {
+          const uS = run.length === 1 ? item.u : startU + runIdx * avgPanelWidth;
+          const vS = item.vIdx * (item.dims.hM + 0.05);
+          const dE_s = uS * ridgeE + vS * downE;
+          const dN_s = uS * ridgeN + vS * downN;
+          const newLat = segLat + dN_s / 111_320;
+          const newLng = segLng + dE_s / (111_320 * safeCosLat);
+
+          out.set(item.panel, {
+            ...item.panel,
+            center: { latitude: newLat, longitude: newLng },
+          });
+        });
+      }
     }
   }
 
@@ -417,11 +460,12 @@ export function PanelOverlayCesium({
         const anchorHeight = Number.isFinite(meshHeight)
           ? (meshHeight as number)
           : solarHeight;
+        const renderPitch = Math.abs(pitch) < FLAT_SEGMENT_PITCH_DEGREES ? 0 : pitch;
 
         const flatHeights: number[] = [];
         for (const c of corners) {
           const h =
-            planeFitHeight(c.lat, c.lng, segLat, segLng, anchorHeight, pitch, azimuth) +
+            planeFitHeight(c.lat, c.lng, segLat, segLng, anchorHeight, renderPitch, azimuth) +
             PANEL_HEIGHT_OFFSET_M;
           flatHeights.push(c.lng, c.lat, h);
         }
