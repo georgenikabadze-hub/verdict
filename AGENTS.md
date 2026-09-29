@@ -56,9 +56,8 @@ verdict/
 │   │   ├── LiveRoofFacts.tsx         # Glass strip showing live Solar API segments
 │   │   ├── VariantCardStack.tsx      # 3 variant cards stack
 │   │   └── SendToInstaller.tsx       # CTA + confirmation state
-│   ├── installer/
-│   │   └── InstallerReview.tsx       # Editable BoM + Recalculate + Approve
-│   └── ui/                           # shadcn primitives (currently sparse)
+│   └── installer/
+│       └── InstallerReview.tsx       # Editable BoM + Recalculate + Approve
 │
 ├── lib/
 │   ├── contracts.ts                  # FROZEN — Intake/BoM/Variant/SizingResult types
@@ -78,8 +77,6 @@ verdict/
 │   │   └── __tests__/                # Vitest — resilience + timeout behavior
 │   └── api-status/
 │       └── Badge.tsx                 # Live/Cached/Error pill component
-│
-├── store/                            # Zustand stores (sparse — most state is local)
 │
 ├── data/
 │   ├── schema.ts                     # Zod schemas matching lib/contracts.ts
@@ -150,7 +147,7 @@ Other paths (e.g. `components/homeowner/HomeShell.tsx`, `app/quote/page.tsx`) ar
 | Language | TypeScript strict |
 | Styling | Tailwind 4 + CSS-var tokens |
 | 3D — interactive | Google Maps JS API (`@googlemaps/js-api-loader` v2 functional API) with `tilt: 45` + `rotateControl` |
-| 3D — cinematic (Sprint 3, planned) | react-three-fiber + DRACOLoader for Ruhr.glb |
+| 3D — cinematic | react-three-fiber + DRACOLoader for `public/meshes/ruhr.glb` (`components/homeowner/RuhrCinematicScene.tsx`) |
 | Forms | Native React `useState` (Zod for validation, no React Hook Form yet) |
 | State | Local component state + occasional Zustand (no global app store) |
 | Data fetching | Native `fetch` with `AbortSignal.timeout()` |
